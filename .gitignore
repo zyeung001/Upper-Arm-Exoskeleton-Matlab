@@ -1,0 +1,27 @@
+# MATLAB / Simulink
+*.asv
+*.autosave
+*.m~
+*.mex*
+*.mat
+octave-workspace
+
+# Simulink build/cache artifacts
+slprj/
+*.slxc
+*.slx.original
+sccprj/
+codegen/
+
+# Generated results & figures (kept out of version control)
+results/*.mat
+results/*.csv
+results/figures/*.png
+results/figures/*.fig
+results/figures/*.pdf
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
