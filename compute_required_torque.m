@@ -1,6 +1,6 @@
-function [tau_total, peak_slosh] = compute_required_torque(traj, f, p)
+function [tau_total, peak_slosh, slosh] = compute_required_torque(traj, f, p)
 %COMPUTE_REQUIRED_TORQUE Slosh forward-simulation + inverse dynamics.
-%   [tau_total, peak_slosh] = COMPUTE_REQUIRED_TORQUE(traj, f, p)
+%   [tau_total, peak_slosh, slosh] = COMPUTE_REQUIRED_TORQUE(traj, f, p)
 %
 %   The slosh angle phi is the only state integrated forward in time: it is
 %   a damped second-order system forced by the end-effector acceleration
@@ -17,7 +17,9 @@ function [tau_total, peak_slosh] = compute_required_torque(traj, f, p)
 %   tau_total (3xN) is then the inverse dynamics of the FULL 4-DOF model
 %   (arm + pendulum) along [q_ref; phi], actuated rows only.
 %
-%   Outputs: tau_total (3xN), peak_slosh = max|phi| (rad, spill proxy).
+%   Outputs: tau_total (3xN), peak_slosh = max|phi| (rad, spill proxy),
+%   slosh struct with the time series phi, phid and the surrogate
+%   parameters w_s, m_s, L_s (used by animate_carry).
 
 % Fill-dependent pendulum surrogate
 m_liq = p.cont.rho * pi * p.cont.Rc^2 * (f * p.cont.Hc);
@@ -55,4 +57,6 @@ for k = 1:N
     tau  = M_fun(qf, pvec)*qddf + C_fun(qf, qdf, pvec)*qdf + G_fun(qf, pvec);
     tau_total(:,k) = tau(1:3);
 end
+
+slosh = struct('phi', phi, 'phid', phid, 'w_s', w_s, 'm_s', m_s, 'L_s', L_s);
 end

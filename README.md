@@ -32,8 +32,18 @@ the end-effector acceleration. There is deliberately **no feedback tracking loop
 main   % derives dynamics once (Symbolic Math Toolbox), runs sweep, saves figures
 ```
 
-Outputs: `results/sweep_results.mat`, PNGs in `results/figures/`.
+Outputs: `results/sweep_results.mat`, PNGs in `results/figures/`. Figures pop up
+when run from the MATLAB desktop and stay hidden under `matlab -batch`.
 Requires MATLAB with the Symbolic Math Toolbox (developed on R2026a).
+
+To watch a single carry as an animation (arm + sloshing container + live
+slosh/torque plots):
+
+```matlab
+animate_carry             % default hard-ish task (f = 0.8, d = 0.4)
+animate_carry(1.0, 0.5)   % hardest corner
+animate_carry(0.8, 0.4, Speed=0.25, Gif=true)  % slow-mo + save a GIF
+```
 
 ## Files
 
@@ -50,6 +60,7 @@ Requires MATLAB with the Symbolic Math Toolbox (developed on R2026a).
 | `run_sweep.m` | fill x distance sweep, all controllers |
 | `make_figures.m` | effort surfaces, difference surface, coverage, peak slosh |
 | `main.m` | derive once → sweep → figures |
+| `animate_carry.m` | animation of a single carry (demo/debug, optional GIF export) |
 
 ## Modeling decisions
 

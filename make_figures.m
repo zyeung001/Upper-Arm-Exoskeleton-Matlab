@@ -89,7 +89,10 @@ end
 
 % ------------------------------------------------------------------------
 function fig = new_fig(sz)
-fig = figure('Visible', 'off', 'Color', 'w', 'Position', [80 80 sz]);
+% Pop up in a desktop session; stay hidden under matlab -batch.
+vis = 'off';
+if usejava('desktop'), vis = 'on'; end
+fig = figure('Visible', vis, 'Color', 'w', 'Position', [80 80 sz]);
 fig.Theme = 'light';   % export must not follow a dark desktop theme
 end
 
@@ -102,7 +105,7 @@ end
 
 function save_fig(fig, outdir, name)
 exportgraphics(fig, fullfile(outdir, [name '.png']), 'Resolution', 200);
-close(fig);
+if strcmp(fig.Visible, 'off'), close(fig); end   % leave on screen if shown
 end
 
 function map = sequential_map()

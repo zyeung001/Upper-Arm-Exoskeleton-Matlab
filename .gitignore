@@ -28,3 +28,4 @@ results/figures/*.pdf
 Thumbs.db
 .vscode/
 .idea/
+results/figures/*.gif
