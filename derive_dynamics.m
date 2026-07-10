@@ -104,12 +104,59 @@ if ~exist(outdir, 'dir'), mkdir(outdir); end
 matlabFunction(M,   'File', fullfile(outdir, 'M_fun'),   'Vars', {q, pvec});
 matlabFunction(C,   'File', fullfile(outdir, 'C_fun'),   'Vars', {q, qd, pvec});
 matlabFunction(G,   'File', fullfile(outdir, 'G_fun'),   'Vars', {q, pvec});
+matlabFunction(V,   'File', fullfile(outdir, 'V_fun'),   'Vars', {q, pvec});
 matlabFunction(ee,  'File', fullfile(outdir, 'ee_fun'),  'Vars', {q3, pvec});
 matlabFunction(aee, 'File', fullfile(outdir, 'aee_fun'), 'Vars', {q3, qd3, qdd3, pvec});
 addpath(outdir);
-fprintf('Exported M_fun, C_fun, G_fun, ee_fun, aee_fun to generated/.\n');
+fprintf('Exported M_fun, C_fun, G_fun, V_fun, ee_fun, aee_fun to generated/.\n');
 
+validate_structure();
 validate_reductions();
+end
+
+% ------------------------------------------------------------------------
+function validate_structure()
+%Independent numeric checks on the exported FULL model (m_s > 0), catching
+%sign/coupling errors the reduction checks cannot:
+%  (a) M symmetric and positive definite at random configurations
+%  (b) Mdot - 2C skew-symmetric (Christoffel/passivity consistency)
+%  (c) free-swing energy conservation (zero torque, zero damping)
+%Note aee_fun needs no separate consistency check: it is the jacobian of
+%the SAME symbolic ee that positions the pendulum bob inside M/C/G, so the
+%slosh forcing and the inverse-dynamics coupling share one kinematics.
+p = params();
+m_liq = p.cont.rho * pi * p.cont.Rc^2 * (0.7 * p.cont.Hc);
+pv = pack_pvec(p, p.slosh.k_m * m_liq, p.cont.Rc);
+rng(2);
+
+for trial = 1:5
+    qr = randn(4, 1) * 0.6;  qdr = randn(4, 1);
+    M = M_fun(qr, pv);
+    assert(max(abs(M - M.'), [], 'all') < 1e-9, 'M not symmetric');
+    assert(min(eig(M)) > 0, 'M not positive definite');
+    Md = zeros(4);  h = 1e-6;
+    for k = 1:4
+        e = zeros(4, 1);  e(k) = h;
+        Md = Md + (M_fun(qr + e, pv) - M_fun(qr - e, pv)) / (2*h) * qdr(k);
+    end
+    S = Md - 2 * C_fun(qr, qdr, pv);
+    assert(max(abs(S + S.'), [], 'all') < 1e-5, ...
+        'Mdot - 2C not skew-symmetric (C/Christoffel error)');
+end
+
+x0  = [0.3; -0.5; 0.2; 0.4; zeros(4, 1)];
+ode = @(t, x) [x(5:8); M_fun(x(1:4), pv) \ ...
+    (-C_fun(x(1:4), x(5:8), pv) * x(5:8) - G_fun(x(1:4), pv))];
+[~, X] = ode45(ode, [0 1.5], x0, odeset('RelTol', 1e-10, 'AbsTol', 1e-12));
+E = zeros(size(X, 1), 1);
+for k = 1:size(X, 1)
+    qk = X(k, 1:4).';  qdk = X(k, 5:8).';
+    E(k) = qdk.' * M_fun(qk, pv) * qdk / 2 + V_fun(qk, pv);
+end
+drift = max(abs(E - E(1)));
+assert(drift < 1e-5 * max(1, abs(E(1))), ...
+    'free-swing energy drifted by %.3g J', drift);
+fprintf('Structure validation passed (M sym/PD, Mdot-2C skew, energy).\n');
 end
 
 % ------------------------------------------------------------------------

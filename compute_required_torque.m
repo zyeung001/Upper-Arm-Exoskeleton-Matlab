@@ -24,7 +24,7 @@ function [tau_total, peak_slosh, slosh] = compute_required_torque(traj, f, p)
 % Fill-dependent pendulum surrogate
 m_liq = p.cont.rho * pi * p.cont.Rc^2 * (f * p.cont.Hc);
 m_s   = p.slosh.k_m * m_liq;
-L_s   = p.cont.Rc;              % slosh length scale = container radius
+L_s   = p.slosh.L_s_factor * p.cont.Rc;   % slosh length scale (default Rc)
 w_s   = sqrt(p.g / L_s);
 zs    = p.slosh.zeta_s;
 pvec  = pack_pvec(p, m_s, L_s);

@@ -31,13 +31,18 @@ p.cont.rho = 1000;   % liquid density (kg/m^3, water)
 % w_n = sqrt(g/R));  w_s = sqrt(g/L_s);  fixed damping ratio zeta_s.
 p.slosh.k_m    = 0.5;    % participating-mass fraction (tunable model constant)
 p.slosh.zeta_s = 0.05;   % slosh damping ratio (fixed)
+p.slosh.L_s_factor = 1.0; % L_s = L_s_factor * Rc (1.0 = Bai et al.'s w_n
+                          % = sqrt(g/R); varied in the sensitivity study)
 
 % ---- Reach geometry -----------------------------------------------------
 % Start point of the carry (m, base frame at the shoulder-rotation axis).
+% Chosen so the elbow-down IK gives a natural pose: hand slightly below the
+% shoulder in front of the body, elbow flexion ~137 deg at the start (well
+% inside human ROM), relaxing toward ~50 deg at the farthest target.
 % The target is start + d*u_reach; u_reach is a unit vector, mostly radial
 % with a small tangential and upward component. All grid targets must stay
 % inside the arm workspace (asserted in make_trajectory).
-p.reach.start = [0.50; 0; -0.10];
+p.reach.start = [0.55; 0; -0.15];
 u = [0.94; 0.23; 0.25];
 p.reach.dir   = u / norm(u);
 
@@ -47,9 +52,17 @@ p.reach.dir   = u / norm(u);
 p.sim.T_move = 1.0;    % s
 p.sim.dt     = 0.005;  % s
 
-% ---- Sweep grids ---------------------------------------------------------
+% ---- Evaluation grid (the reported sweep) --------------------------------
 p.sweep.n_f   = 10;  p.sweep.f_min = 0.1;  p.sweep.f_max = 1.0;   % fill level
 p.sweep.n_d   = 10;  p.sweep.d_min = 0.1;  p.sweep.d_max = 0.5;   % reach (m)
+
+% ---- Calibration grid (train/test split) ----------------------------------
+% D_lo/D_hi and the band floor are tuned ONLY on these 5x5 tasks, which are
+% chosen at points DISJOINT from the evaluation grid above (asserted in
+% calibrate_controller). Coverage is then reported on the evaluation grid,
+% so the headline number is measured on tasks the tuning never saw.
+p.calib.f = linspace(0.15, 0.95, 5);
+p.calib.d = linspace(0.125, 0.475, 5);
 
 % ---- Controllers (Decision B: parameterized, adjustable) ----------------
 % alpha_min > 0 and alpha_max < 1: the human stays engaged and the exo
@@ -58,20 +71,30 @@ p.sweep.n_d   = 10;  p.sweep.d_min = 0.1;  p.sweep.d_max = 0.5;   % reach (m)
 p.ctrl.alpha_fixed = 0.5;   % controller 1
 p.ctrl.alpha_min   = 0.2;   % lower bound for controllers 2 and 3
 p.ctrl.alpha_max   = 0.72;  % upper bound for controllers 2 and 3
-% Difficulty-adaptive ramp (controller 3): alpha rises linearly from
-% alpha_min at D_lo to alpha_max at D_hi, clamped. Tuned to the observed
-% difficulty range of the sweep, D in [3.27, 8.72] N m s (printed by
-% run_sweep), so that (1-alpha(D))*D stays inside the target band.
-p.ctrl.D_lo = 3.2;    % N m s
-p.ctrl.D_hi = 8.8;    % N m s
+% Controller 3 ('difficulty', the adopted law) is closed-form:
+% alpha(D) = clamp(1 - E*/D) with E* = band midpoint - see controllers.m.
+% It has NO free parameters beyond the clamps above.
+% D_lo/D_hi below are needed only by the REJECTED 'difficulty-linear'
+% ablation baseline; calibrate_controller still derives them (min/max
+% calibration difficulty) because D_lo also feeds the E_low rule.
+p.ctrl.D_lo = NaN;    % set by calibrate_controller (N m s)
+p.ctrl.D_hi = NaN;    % set by calibrate_controller (N m s)
 
 % ---- Target human-effort band (units of E_human, N m s) -----------------
 % The load-bearing assumption: below E_low = over-assisted (wasteful),
 % above E_high = under-supported. Precedent for a bounded, non-zero human
 % share: Zhang et al. 2024 (effort/deviation reward, bounded stiffness),
-% Bai et al. 2025 (perceptible retained share). Tuned together with
-% D_lo/D_hi: ~2.85 N m s is ~1 N m mean torque per joint over the 1 s
-% carry, a comfortable fraction of shoulder/elbow voluntary strength.
-p.band.E_low  = 2.3;
-p.band.E_high = 3.4;
+% Bai et al. 2025 (perceptible retained share).
+% E_high is fixed A PRIORI, before any sweep: ~1.1 N m of mean torque per
+% joint sustained over the 1 s carry, a small fraction of shoulder/elbow
+% voluntary strength. It is never adjusted to fit results.
+% E_low is NOT set here: it follows from the alpha_min bound by a fixed
+% rule, E_low = (1 - alpha_min) * D_lo, evaluated on calibration data only
+% (calibrate_controller) - the lowest effort any in-bounds controller can
+% leave on the easiest calibration task.
+% The band also fixes the difficulty controller's target E* = band
+% midpoint (controllers.m), so E* is fully determined BEFORE any
+% evaluation data is seen: ceiling a priori, floor by rule on calibration.
+p.band.E_low  = NaN;   % set by calibrate_controller
+p.band.E_high = 3.4;   % a-priori ergonomic ceiling
 end
