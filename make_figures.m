@@ -1,12 +1,14 @@
 function make_figures(R)
 %MAKE_FIGURES All output figures from a sweep result struct R (run_sweep).
-%   1. Human-effort surfaces per controller + target band planes (central)
-%   2. Difference surface: E_human(difficulty-adaptive) - E_human(fixed)
-%   3. Exo-effort surfaces per controller (guards the alpha=1 trivial fix)
-%   4. In-band coverage headline bars
-%   5. Peak-slosh surface (task-space characterization)
-%   6. In-band status maps - WHERE each controller fails, and how
-%   7. Assistance-level (alpha) maps - what each controller actually does
+%   Every map is a 2D fill x distance heatmap (one simulated carry per cell);
+%   color encodes one job per figure (magnitude, or polarity about a target).
+%   1. Human-effort maps, diverging about the target band (central figure):
+%      gray = in band, blue = over-assisted (waste), red = under-supported
+%   2. Difference map: E_human(difficulty-adaptive) - E_human(fixed)
+%   3. Exo-effort maps (guards the alpha=1 trivial fix)
+%   4. Band-status composition bars - the headline (% over / in / under)
+%   5. Peak-slosh map (task-space characterization)
+%   6. Assistance-level (alpha) maps - what each controller actually does
 %   PNGs are saved to results/figures/.
 
 p = R.p;
@@ -14,116 +16,144 @@ outdir = fullfile(fileparts(mfilename('fullpath')), 'results', 'figures');
 if ~exist(outdir, 'dir'), mkdir(outdir); end
 
 names = {'Fixed', 'Fill-only adaptive', 'Difficulty-adaptive'};
-% Fixed categorical order, colorblind-safe (Okabe-Ito): blue, orange, green
-cols  = [0 114 178; 230 159 0; 0 158 115] / 255;
-[Dm, Fm] = meshgrid(R.d_grid, R.f_grid);
+d = R.d_grid;  f = R.f_grid;
 
-% ---- 1. Human-effort surfaces + band (central figure) -------------------
-fig = new_fig([1100 420]);
-zmax = 1.1 * max(R.E_human(:));
+% Ink roles (reference dataviz palette, light mode)
+ink1  = hex2rgb('#0b0b0b');    % primary
+ink2  = hex2rgb('#52514e');    % secondary
+muted = hex2rgb('#898781');    % axis/labels
+
+% ---- 1. Human-effort maps, diverging about the band (central) -----------
+% One map answers three questions at once: how much effort (intensity),
+% which failure mode (hue), and where in the task space (position).
+band = [p.band.E_low, p.band.E_high];
+ctr  = mean(band);
+lim  = max(abs([R.E_human(:) - ctr; band(:) - ctr]));
+cl   = [ctr - lim, ctr + lim];
+fig = new_fig([1180 400]);
+tl = tiledlayout(fig, 1, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
 for c = 1:3
-    ax = subplot(1, 3, c);
-    surf(ax, Dm, Fm, R.E_human(:,:,c), 'FaceColor', cols(c,:), ...
-        'FaceAlpha', 0.85, 'EdgeColor', 'w', 'EdgeAlpha', 0.5);
-    hold(ax, 'on');
-    band = @(z) surf(ax, Dm, Fm, z*ones(size(Dm)), 'FaceColor', [0.45 0.45 0.45], ...
-        'FaceAlpha', 0.25, 'EdgeColor', 'none');
-    band(p.band.E_low);  band(p.band.E_high);
-    style_axes3(ax, 'E_{human} (N m s)');
-    zlim(ax, [0 zmax]);
-    title(ax, sprintf('%s — %.0f%% in band', names{c}, 100*R.coverage(c)));
+    ax = nexttile(tl);
+    imagesc(ax, d, f, R.E_human(:,:,c));
+    style_map(ax, d, f, muted);
+    clim(ax, cl);
+    title(ax, sprintf('%s — %.0f%% in band', names{c}, 100*R.coverage(c)), ...
+        'Color', ink1, 'FontWeight', 'normal');
 end
-sgtitle(fig, 'Human effort vs. task, with target band [E_{low}, E_{high}]');
-save_fig(fig, outdir, 'fig1_human_effort_surfaces');
+colormap(fig, band_diverging_map(cl, band));
+cb = colorbar(ax);  cb.Layout.Tile = 'east';
+cb.Ticks = [cl(1), band(1), band(2), cl(2)];
+cb.TickLabels = compose('%.1f', cb.Ticks);
+cb.Label.String = 'E_{human} (N m s)   [gray = in band]';
+cb.Color = ink2;
+title(tl, {'Human effort vs. task', ['blue = over-assisted (waste),  ' ...
+    'gray = in band,  red = under-supported (strain)']}, 'Color', ink1);
+save_fig(fig, outdir, 'fig1_human_effort_maps');
 
-% ---- 2. Difference surface ----------------------------------------------
-fig = new_fig([560 440]);
+% ---- 2. Difference map ----------------------------------------------------
+fig = new_fig([520 420]);
 ax = axes(fig);
 dE = R.E_human(:,:,3) - R.E_human(:,:,1);
-surf(ax, Dm, Fm, dE, 'EdgeColor', 'w', 'EdgeAlpha', 0.5);
-colormap(ax, diverging_map());
+imagesc(ax, d, f, dE);
+style_map(ax, d, f, muted);
 lim = max(abs(dE(:)));  clim(ax, [-lim lim]);
-cb = colorbar(ax);  cb.Label.String = '\Delta E_{human} (N m s)';
-style_axes3(ax, '\Delta E_{human} (N m s)');
+colormap(ax, diverging_map());
+cb = colorbar(ax);  cb.Color = ink2;
+cb.Label.String = '\Delta E_{human} (N m s)';
 title(ax, {'E_{human}: difficulty-adaptive − fixed', ...
-    '(negative = adaptation relieves the human)'});
-save_fig(fig, outdir, 'fig2_difference_surface');
+    '(blue = adaptation relieves the human)'}, 'Color', ink1, ...
+    'FontWeight', 'normal');
+save_fig(fig, outdir, 'fig2_difference_map');
 
-% ---- 3. Exo-effort surfaces ----------------------------------------------
-fig = new_fig([1100 420]);
+% ---- 3. Exo-effort maps ----------------------------------------------------
+fig = new_fig([1180 400]);
+tl = tiledlayout(fig, 1, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
 for c = 1:3
-    ax = subplot(1, 3, c);
-    surf(ax, Dm, Fm, R.E_exo(:,:,c), 'EdgeColor', 'w', 'EdgeAlpha', 0.5);
-    colormap(ax, sequential_map());
-    clim(ax, [0 max(R.E_exo(:))]);
-    style_axes3(ax, 'E_{exo} (N m s)');
-    zlim(ax, [0 1.1*max(R.E_exo(:))]);
-    title(ax, names{c});
+    ax = nexttile(tl);
+    imagesc(ax, d, f, R.E_exo(:,:,c));
+    style_map(ax, d, f, muted);
+    clim(ax, [0, max(R.E_exo(:))]);
+    title(ax, names{c}, 'Color', ink1, 'FontWeight', 'normal');
 end
-sgtitle(fig, 'Exoskeleton effort (bounded: \alpha \leq \alpha_{max} < 1)');
-save_fig(fig, outdir, 'fig3_exo_effort_surfaces');
+colormap(fig, sequential_map());
+cb = colorbar(ax);  cb.Layout.Tile = 'east';  cb.Color = ink2;
+cb.Label.String = 'E_{exo} (N m s)';
+title(tl, 'Exoskeleton effort (bounded: \alpha \leq \alpha_{max} < 1)', ...
+    'Color', ink1);
+save_fig(fig, outdir, 'fig3_exo_effort_maps');
 
-% ---- 4. In-band coverage headline ----------------------------------------
-fig = new_fig([480 380]);
-ax = axes(fig);
-b = bar(ax, 100*R.coverage, 0.6, 'FaceColor', 'flat', 'EdgeColor', 'none');
-b.CData = cols;
-text(ax, 1:3, 100*R.coverage + 3, ...
-    compose('%.0f%%', 100*R.coverage), 'HorizontalAlignment', 'center');
-set(ax, 'XTickLabel', {'Fixed', 'Fill-only', 'Difficulty'}, 'Box', 'off');
-ylim(ax, [0 110]);  grid(ax, 'on');
-ylabel(ax, 'Tasks with human effort in band (%)');
-title(ax, sprintf('In-band coverage over %d tasks', numel(R.D)));
-save_fig(fig, outdir, 'fig4_inband_coverage');
-
-% ---- 5. Peak-slosh surface ------------------------------------------------
-fig = new_fig([560 440]);
-ax = axes(fig);
-surf(ax, Dm, Fm, rad2deg(R.peak_slosh), 'EdgeColor', 'w', 'EdgeAlpha', 0.5);
-colormap(ax, sequential_map());
-cb = colorbar(ax);  cb.Label.String = 'peak |\phi| (deg)';
-style_axes3(ax, 'peak |\phi| (deg)');
-title(ax, 'Peak slosh angle over the task space');
-save_fig(fig, outdir, 'fig5_peak_slosh_surface');
-
-% ---- 6. In-band status maps ------------------------------------------------
-% Reads like a scorecard: where in the task space each controller keeps the
-% human in the band, over-assists (waste), or under-supports (strain).
-fig = new_fig([1150 400]);
-smap = [86 180 233; 0 158 115; 213 94 0] / 255;   % over / in / under
+% ---- 4. Band-status composition bars (headline) ----------------------------
+% 100% stacked: what fraction of the 100 tasks each controller leaves
+% over-assisted / in band / under-supported. Status colors are reserved
+% for state and always paired with a text label.
+col_over  = hex2rgb('#fab219');   % warning: waste
+col_in    = hex2rgb('#0ca30c');   % good
+col_under = hex2rgb('#d03b3b');   % critical: strain
+fig = new_fig([640 300]);
+ax = axes(fig);  hold(ax, 'on');
+share = zeros(3, 3);              % rows: controller; cols: over, in, under
 for c = 1:3
-    ax = subplot(1, 3, c);
-    imagesc(ax, R.d_grid, R.f_grid, R.status(:,:,c));
-    axis(ax, 'xy');
-    colormap(ax, smap);  clim(ax, [-1.5 1.5]);
-    xlabel(ax, 'reach distance d (m)');  ylabel(ax, 'fill level f (-)');
     st = R.status(:,:,c);
-    title(ax, {names{c}, sprintf('%.0f%% in band | %.0f%% over | %.0f%% under', ...
-        100*mean(st(:) == 0), 100*mean(st(:) == -1), 100*mean(st(:) == 1))});
+    share(c,:) = 100 * [mean(st(:) == -1), mean(st(:) == 0), mean(st(:) == 1)];
 end
-cb = colorbar(ax);
-cb.Ticks = [-1 0 1];
-cb.TickLabels = {'over-assisted (waste)', 'in band', 'under-supported'};
-sgtitle(fig, 'Human-effort band status across the task space');
-save_fig(fig, outdir, 'fig6_inband_status_maps');
+order = [3 2 1];                  % difficulty on top
+hb = barh(ax, share(order,:), 'stacked', 'BarWidth', 0.62, ...
+    'EdgeColor', 'w', 'LineWidth', 2);
+hb(1).FaceColor = col_over;  hb(2).FaceColor = col_in;
+hb(3).FaceColor = col_under;
+xedge = [zeros(3,1), cumsum(share(order,:), 2)];
+for r = 1:3
+    for s = 1:3
+        if share(order(r), s) >= 5
+            w = (s == 2);         % bold the in-band share (the headline)
+            text(ax, mean(xedge(r, s:s+1)), r, ...
+                sprintf('%.0f%%', share(order(r), s)), ...
+                'HorizontalAlignment', 'center', 'FontSize', 9 + w, ...
+                'FontWeight', ternary(w, 'bold', 'normal'), 'Color', 'w');
+        end
+    end
+end
+set(ax, 'YTick', 1:3, 'YTickLabel', names(order), 'XLim', [0 100], ...
+    'YLim', [0.4 3.6], 'Box', 'off', 'XColor', muted, 'YColor', ink2, ...
+    'TickLength', [0 0]);
+xlabel(ax, 'share of the 100 tasks (%)', 'Color', ink2);
+legend(hb, {'over-assisted (waste)', 'in band', 'under-supported (strain)'}, ...
+    'Location', 'southoutside', 'Orientation', 'horizontal', 'Box', 'off', ...
+    'TextColor', ink2);
+title(ax, 'Where the human effort lands, per controller', 'Color', ink1, ...
+    'FontWeight', 'normal');
+save_fig(fig, outdir, 'fig4_band_status_stack');
 
-% ---- 7. Assistance-level maps ----------------------------------------------
-fig = new_fig([1150 400]);
+% ---- 5. Peak-slosh map ------------------------------------------------------
+% Second sequential context in the suite -> second hue (aqua), own ramp.
+fig = new_fig([520 420]);
+ax = axes(fig);
+imagesc(ax, d, f, rad2deg(R.peak_slosh));
+style_map(ax, d, f, muted);
+colormap(ax, sequential_map_aqua());
+cb = colorbar(ax);  cb.Color = ink2;
+cb.Label.String = 'peak |\phi| (deg)';
+title(ax, 'Peak slosh angle over the task space', 'Color', ink1, ...
+    'FontWeight', 'normal');
+save_fig(fig, outdir, 'fig5_peak_slosh_map');
+
+% ---- 6. Assistance-level maps ----------------------------------------------
+fig = new_fig([1180 400]);
+tl = tiledlayout(fig, 1, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
 for c = 1:3
-    ax = subplot(1, 3, c);
-    imagesc(ax, R.d_grid, R.f_grid, R.alpha(:,:,c));
-    axis(ax, 'xy');
-    colormap(ax, sequential_map());
+    ax = nexttile(tl);
+    imagesc(ax, d, f, R.alpha(:,:,c));
+    style_map(ax, d, f, muted);
     clim(ax, [p.ctrl.alpha_min, p.ctrl.alpha_max]);
-    xlabel(ax, 'reach distance d (m)');  ylabel(ax, 'fill level f (-)');
-    title(ax, names{c});
+    title(ax, names{c}, 'Color', ink1, 'FontWeight', 'normal');
 end
-cb = colorbar(ax);
+colormap(fig, sequential_map());
+cb = colorbar(ax);  cb.Layout.Tile = 'east';  cb.Color = ink2;
 cb.Label.String = 'assistance fraction \alpha';
-sgtitle(fig, ['What each controller does: exo share \alpha over the task ' ...
-    'space (\alpha_{min} = ' sprintf('%.2f', p.ctrl.alpha_min) ...
-    ', \alpha_{max} = ' sprintf('%.2f', p.ctrl.alpha_max) ')']);
-save_fig(fig, outdir, 'fig7_alpha_maps');
+title(tl, sprintf(['What each controller does: exo share \\alpha ' ...
+    '(\\alpha_{min} = %.2f, \\alpha_{max} = %.2f)'], ...
+    p.ctrl.alpha_min, p.ctrl.alpha_max), 'Color', ink1);
+save_fig(fig, outdir, 'fig6_alpha_maps');
 
 fprintf('Figures saved to %s\n', outdir);
 end
@@ -133,15 +163,26 @@ function fig = new_fig(sz)
 % Pop up in a desktop session; stay hidden under matlab -batch.
 vis = 'off';
 if usejava('desktop'), vis = 'on'; end
-fig = figure('Visible', vis, 'Color', 'w', 'Position', [80 80 sz]);
+fig = figure('Visible', vis, 'Color', hex2rgb('#fcfcfb'), ...
+    'Position', [80 80 sz]);
 fig.Theme = 'light';   % export must not follow a dark desktop theme
 end
 
-function style_axes3(ax, zlab)
+function style_map(ax, d, f, muted)
+% Shared heatmap chrome: y up, hairline white cell grid, recessive axes.
+axis(ax, 'xy');
+hold(ax, 'on');
+dx = (d(2) - d(1)) / 2;  dy = (f(2) - f(1)) / 2;
+xe = [d - dx, d(end) + dx];  ye = [f - dy, f(end) + dy];
+vx = [repmat(xe, 2, 1);                    nan(1, numel(xe))];
+vy = [repmat([ye(1); ye(end)], 1, numel(xe)); nan(1, numel(xe))];
+hx = [repmat([xe(1); xe(end)], 1, numel(ye)); nan(1, numel(ye))];
+hy = [repmat(ye, 2, 1);                    nan(1, numel(ye))];
+plot(ax, [vx(:); hx(:)], [vy(:); hy(:)], '-', 'Color', 'w', 'LineWidth', 0.75);
+xlim(ax, xe([1 end]));  ylim(ax, ye([1 end]));
+set(ax, 'XColor', muted, 'YColor', muted, 'TickLength', [0 0], 'Box', 'off');
 xlabel(ax, 'reach distance d (m)');
 ylabel(ax, 'fill level f (-)');
-zlabel(ax, zlab);
-grid(ax, 'on');  view(ax, -35, 22);
 end
 
 function save_fig(fig, outdir, name)
@@ -149,13 +190,50 @@ exportgraphics(fig, fullfile(outdir, [name '.png']), 'Resolution', 200);
 if strcmp(fig.Visible, 'off'), close(fig); end   % leave on screen if shown
 end
 
+function rgb = hex2rgb(h)
+rgb = double(sscanf(h(2:end), '%2x%2x%2x')') / 255;
+end
+
+function map = ramp(hexes, n)
+% Interpolate an n-step colormap through a list of hex anchors.
+anchors = cell2mat(cellfun(@(h) hex2rgb(h), hexes(:), 'UniformOutput', false));
+map = interp1(linspace(0, 1, size(anchors, 1)), anchors, linspace(0, 1, n));
+end
+
 function map = sequential_map()
-% Single-hue sequential: light -> dark blue
-map = interp1([0 1], [0.93 0.96 1.00; 0 0.28 0.55], linspace(0, 1, 256));
+% Reference sequential blue, steps 100 -> 700 (light = near zero).
+map = ramp({'#cde2fb', '#9ec5f4', '#6da7ec', '#3987e5', '#256abf', ...
+    '#184f95', '#0d366b'}, 256);
+end
+
+function map = sequential_map_aqua()
+% Second sequential hue (aqua), own light -> dark ramp.
+map = ramp({'#dcf3ea', '#8fd9bd', '#3cbd8d', '#1baf7a', '#12805a', ...
+    '#0a4a34'}, 256);
 end
 
 function map = diverging_map()
-% Blue -> neutral light gray -> vermillion, neutral at the midpoint
-anchors = [0 0.447 0.698; 0.94 0.94 0.94; 0.835 0.369 0];
-map = interp1([0 0.5 1], anchors, linspace(0, 1, 256));
+% Reference diverging pair: blue <-> red, neutral gray midpoint.
+map = ramp({'#104281', '#3987e5', '#9ec5f4', '#f0efec', '#f2afa5', ...
+    '#e34948', '#8f1d1d'}, 256);
+end
+
+function map = band_diverging_map(cl, band)
+% Diverging map whose NEUTRAL ZONE is the target band [band(1), band(2)]
+% mapped onto value limits cl: gray inside the band, blue deepening below
+% (over-assisted), red deepening above (under-supported).
+n = 256;
+v = linspace(cl(1), cl(2), n)';
+blues = ramp({'#cde2fb', '#6da7ec', '#3987e5', '#1c5cab', '#0d366b'}, n);
+reds  = ramp({'#f6cdc6', '#ee9385', '#e34948', '#b52a2a', '#7e1616'}, n);
+map = repmat(hex2rgb('#f0efec'), n, 1);
+lo = v < band(1);  hi = v > band(2);
+tlo = (band(1) - v(lo)) / max(band(1) - cl(1), eps);   % 0 at edge, 1 at min
+thi = (v(hi) - band(2)) / max(cl(2) - band(2), eps);
+map(lo,:) = interp1(linspace(0, 1, n), blues, tlo);
+map(hi,:) = interp1(linspace(0, 1, n), reds,  thi);
+end
+
+function out = ternary(cond, a, b)
+if cond, out = a; else, out = b; end
 end
