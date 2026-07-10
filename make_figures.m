@@ -5,6 +5,8 @@ function make_figures(R)
 %   3. Exo-effort surfaces per controller (guards the alpha=1 trivial fix)
 %   4. In-band coverage headline bars
 %   5. Peak-slosh surface (task-space characterization)
+%   6. In-band status maps - WHERE each controller fails, and how
+%   7. Assistance-level (alpha) maps - what each controller actually does
 %   PNGs are saved to results/figures/.
 
 p = R.p;
@@ -83,6 +85,45 @@ cb = colorbar(ax);  cb.Label.String = 'peak |\phi| (deg)';
 style_axes3(ax, 'peak |\phi| (deg)');
 title(ax, 'Peak slosh angle over the task space');
 save_fig(fig, outdir, 'fig5_peak_slosh_surface');
+
+% ---- 6. In-band status maps ------------------------------------------------
+% Reads like a scorecard: where in the task space each controller keeps the
+% human in the band, over-assists (waste), or under-supports (strain).
+fig = new_fig([1150 400]);
+smap = [86 180 233; 0 158 115; 213 94 0] / 255;   % over / in / under
+for c = 1:3
+    ax = subplot(1, 3, c);
+    imagesc(ax, R.d_grid, R.f_grid, R.status(:,:,c));
+    axis(ax, 'xy');
+    colormap(ax, smap);  clim(ax, [-1.5 1.5]);
+    xlabel(ax, 'reach distance d (m)');  ylabel(ax, 'fill level f (-)');
+    st = R.status(:,:,c);
+    title(ax, {names{c}, sprintf('%.0f%% in band | %.0f%% over | %.0f%% under', ...
+        100*mean(st(:) == 0), 100*mean(st(:) == -1), 100*mean(st(:) == 1))});
+end
+cb = colorbar(ax);
+cb.Ticks = [-1 0 1];
+cb.TickLabels = {'over-assisted (waste)', 'in band', 'under-supported'};
+sgtitle(fig, 'Human-effort band status across the task space');
+save_fig(fig, outdir, 'fig6_inband_status_maps');
+
+% ---- 7. Assistance-level maps ----------------------------------------------
+fig = new_fig([1150 400]);
+for c = 1:3
+    ax = subplot(1, 3, c);
+    imagesc(ax, R.d_grid, R.f_grid, R.alpha(:,:,c));
+    axis(ax, 'xy');
+    colormap(ax, sequential_map());
+    clim(ax, [p.ctrl.alpha_min, p.ctrl.alpha_max]);
+    xlabel(ax, 'reach distance d (m)');  ylabel(ax, 'fill level f (-)');
+    title(ax, names{c});
+end
+cb = colorbar(ax);
+cb.Label.String = 'assistance fraction \alpha';
+sgtitle(fig, ['What each controller does: exo share \alpha over the task ' ...
+    'space (\alpha_{min} = ' sprintf('%.2f', p.ctrl.alpha_min) ...
+    ', \alpha_{max} = ' sprintf('%.2f', p.ctrl.alpha_max) ')']);
+save_fig(fig, outdir, 'fig7_alpha_maps');
 
 fprintf('Figures saved to %s\n', outdir);
 end

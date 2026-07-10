@@ -45,6 +45,39 @@ animate_carry(1.0, 0.5)   % hardest corner
 animate_carry(0.8, 0.4, Speed=0.25, Gif=true)  % slow-mo + save a GIF
 ```
 
+## How to read the results
+
+The study asks one question: **which controller keeps the human's effort inside a
+comfortable band across all tasks?** Every output answers a piece of that.
+
+**Animation (`animate_carry`)** — left: the arm carries the cup from *start* to
+*target*; the liquid surface inside the cup tilts with the slosh angle (true
+scale). Right, top to bottom: (1) the cup seen side-on, so the tilt is obvious;
+(2) the slosh angle over time — the disturbance the carry excites; (3) the
+instantaneous torque demand and how the difficulty-adaptive controller splits it
+between exo and human; (4) **the payoff plot**: cumulative human effort for all
+three controllers against the grey target band — a curve that ends inside the
+band means that controller kept the human comfortable on this task. A metrics
+table is printed to the console for the task.
+
+**Sweep figures (`main` / `make_figures`)**
+1. `fig1` human-effort surfaces — the central result. The fixed controller's
+   surface pierces the two grey band planes (below on easy tasks = wasted
+   assistance, above on hard tasks = human straining); the difficulty-adaptive
+   surface stays between them.
+2. `fig2` difference surface — where adaptation relieves the human most
+   (negative/blue = relief, concentrated in the hard high-fill long-reach corner).
+3. `fig3` exo-effort surfaces — sanity check that the adaptive controller wins
+   without the exo just doing everything (alpha is capped below 1).
+4. `fig4` coverage bars — the headline number: % of the 100 tasks in band.
+5. `fig5` peak-slosh surface — why hard tasks are hard (more slosh).
+6. `fig6` status maps — a scorecard of the task space: blue = over-assisted
+   (waste), green = in band, red = under-supported (strain).
+7. `fig7` alpha maps — what each controller actually commands: fixed is flat,
+   fill-only varies with fill level, difficulty-adaptive follows the true
+   difficulty gradient.
+
+
 ## Files
 
 | File | Purpose |
@@ -58,7 +91,7 @@ animate_carry(0.8, 0.4, Speed=0.25, Gif=true)  % slow-mo + save a GIF
 | `controllers.m` | three `alpha` laws + torque split |
 | `compute_metrics.m` | `E_human`, `E_exo`, in-band status |
 | `run_sweep.m` | fill x distance sweep, all controllers |
-| `make_figures.m` | effort surfaces, difference surface, coverage, peak slosh |
+| `make_figures.m` | effort surfaces, difference, coverage, peak slosh, status + alpha maps |
 | `main.m` | derive once → sweep → figures |
 | `animate_carry.m` | animation of a single carry (demo/debug, optional GIF export) |
 

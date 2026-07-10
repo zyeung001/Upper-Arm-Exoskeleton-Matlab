@@ -12,12 +12,13 @@ d_grid = linspace(p.sweep.d_min, p.sweep.d_max, p.sweep.n_d);
 nf = numel(f_grid);  nd = numel(d_grid);  nc = numel(laws);
 
 R.laws = laws;  R.f_grid = f_grid;  R.d_grid = d_grid;  R.p = p;
-R.D          = zeros(nf, nd);
-R.peak_slosh = zeros(nf, nd);
-R.E_human    = zeros(nf, nd, nc);
-R.E_exo      = zeros(nf, nd, nc);
-R.alpha      = zeros(nf, nd, nc);
-R.status     = zeros(nf, nd, nc);
+R.D            = zeros(nf, nd);
+R.peak_slosh   = zeros(nf, nd);
+R.E_human      = zeros(nf, nd, nc);
+R.E_exo        = zeros(nf, nd, nc);
+R.alpha        = zeros(nf, nd, nc);
+R.status       = zeros(nf, nd, nc);
+R.tau_pk_human = zeros(nf, nd, nc);
 
 fprintf('Running %dx%d sweep...\n', nf, nd);
 for j = 1:nd
@@ -32,10 +33,11 @@ for j = 1:nd
             [tau_exo, tau_human, alpha] = ...
                 controllers(laws{c}, tau_total, f_grid(i), D, p);
             m = compute_metrics(traj.t, tau_human, tau_exo, p);
-            R.E_human(i,j,c) = m.E_human;
-            R.E_exo(i,j,c)   = m.E_exo;
-            R.alpha(i,j,c)   = alpha;
-            R.status(i,j,c)  = m.status;
+            R.E_human(i,j,c)      = m.E_human;
+            R.E_exo(i,j,c)        = m.E_exo;
+            R.alpha(i,j,c)        = alpha;
+            R.status(i,j,c)       = m.status;
+            R.tau_pk_human(i,j,c) = m.tau_pk_human;
         end
     end
     fprintf('  distance %2d/%d done\n', j, nd);
@@ -44,12 +46,22 @@ end
 R.coverage = squeeze(mean(mean(R.status == 0, 1), 2)).';  % in-band fraction
 
 fprintf('\nDifficulty D range: [%.2f, %.2f] N m s\n', min(R.D(:)), max(R.D(:)));
-fprintf('Peak slosh range:   [%.3f, %.3f] rad\n', ...
-    min(R.peak_slosh(:)), max(R.peak_slosh(:)));
-fprintf('In-band coverage (headline):\n');
+fprintf('Peak slosh range:   [%.1f, %.1f] deg\n', ...
+    rad2deg(min(R.peak_slosh(:))), rad2deg(max(R.peak_slosh(:))));
+fprintf('Target human-effort band: [%.2f, %.2f] N m s\n\n', ...
+    p.band.E_low, p.band.E_high);
+fprintf('Per-controller summary over %d tasks:\n', nf*nd);
+fprintf('  %-12s %8s %10s %10s %9s %9s %11s\n', 'controller', 'in-band', ...
+    'over-asst', 'under-sup', 'mean E_h', 'mean E_x', 'max pk tau_h');
 for c = 1:nc
-    fprintf('  %-11s %5.1f%%\n', laws{c}, 100*R.coverage(c));
+    st = R.status(:,:,c);
+    fprintf('  %-12s %7.0f%% %9.0f%% %9.0f%% %9.2f %9.2f %8.1f N m\n', ...
+        laws{c}, 100*mean(st(:) == 0), 100*mean(st(:) == -1), ...
+        100*mean(st(:) == 1), mean(R.E_human(:,:,c), 'all'), ...
+        mean(R.E_exo(:,:,c), 'all'), max(R.tau_pk_human(:,:,c), [], 'all'));
 end
+fprintf(['  (over-asst = human effort below band, exo working harder than ' ...
+    'needed;\n   under-sup = human effort above band, left straining)\n']);
 
 outdir = fullfile(fileparts(mfilename('fullpath')), 'results');
 if ~exist(outdir, 'dir'), mkdir(outdir); end
