@@ -9,6 +9,8 @@ function make_figures(R)
 %   4. Band-status composition bars - the headline (% over / in / under)
 %   5. Peak-slosh map (task-space characterization)
 %   6. Assistance-level (alpha) maps - what each controller actually does
+%   7. The adopted alpha(D) law vs the rejected linear ramp, with clamps
+%      and the evaluation tasks marked by regime (clamped / law-controlled)
 %   PNGs are saved to results/figures/.
 
 p = R.p;
@@ -154,6 +156,42 @@ title(tl, sprintf(['What each controller does: exo share \\alpha ' ...
     '(\\alpha_{min} = %.2f, \\alpha_{max} = %.2f)'], ...
     p.ctrl.alpha_min, p.ctrl.alpha_max), 'Color', ink1);
 save_fig(fig, outdir, 'fig6_alpha_maps');
+
+% ---- 7. The adopted alpha(D) law and where the clamps bind ------------------
+E_star = (p.band.E_low + p.band.E_high) / 2;
+amin = p.ctrl.alpha_min;  amax = p.ctrl.alpha_max;
+Dv = linspace(0.95 * min(R.D(:)), 1.03 * max(R.D(:)), 400);
+a_law = max(amin, min(amax, 1 - E_star ./ Dv));
+a_lin = max(amin, min(amax, ...
+    amin + (amax - amin) * (Dv - p.ctrl.D_lo) / (p.ctrl.D_hi - p.ctrl.D_lo)));
+De = R.D(:);
+ae = max(amin, min(amax, 1 - E_star ./ De));
+clamped = abs(ae - amin) < 1e-9 | abs(ae - amax) < 1e-9;
+
+fig = new_fig([640 400]);
+ax = axes(fig);  hold(ax, 'on');
+yline(ax, amin, '-', '\alpha_{min}', 'Color', hex2rgb('#c3c2b7'), ...
+    'LabelHorizontalAlignment', 'left', 'FontSize', 8);
+yline(ax, amax, '-', '\alpha_{max}', 'Color', hex2rgb('#c3c2b7'), ...
+    'LabelHorizontalAlignment', 'left', 'FontSize', 8);
+h_lin = plot(ax, Dv, a_lin, '--', 'Color', muted, 'LineWidth', 1.5);
+h_law = plot(ax, Dv, a_law, '-', 'Color', hex2rgb('#2a78d6'), 'LineWidth', 2);
+h_ok  = plot(ax, De(~clamped), ae(~clamped), 'o', 'MarkerSize', 4.5, ...
+    'Color', 'w', 'MarkerFaceColor', hex2rgb('#2a78d6'));
+h_cl  = plot(ax, De(clamped), ae(clamped), 'o', 'MarkerSize', 4.5, ...
+    'Color', 'w', 'MarkerFaceColor', hex2rgb('#eda100'));
+grid(ax, 'on');  set(ax, 'XColor', muted, 'YColor', muted, 'Box', 'off');
+ylim(ax, [0, 1]);
+xlabel(ax, 'task difficulty D (N m s)', 'Color', ink2);
+ylabel(ax, 'exo share \alpha', 'Color', ink2);
+lg = {sprintf('adopted: \\alpha = 1 - E*/D  (E* = %.2f)', E_star), ...
+    'rejected baseline: linear ramp', ...
+    'eval task, law-controlled (effort = E*)', 'eval task, clamp-limited'};
+legend([h_law, h_lin, h_ok, h_cl], lg, 'Location', 'southeast', ...
+    'Box', 'off', 'TextColor', ink2, 'FontSize', 8);
+title(ax, 'The assistance law: closed-form target-holding, clamped', ...
+    'Color', ink1, 'FontWeight', 'normal');
+save_fig(fig, outdir, 'fig7_alpha_law');
 
 fprintf('Figures saved to %s\n', outdir);
 end

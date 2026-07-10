@@ -6,6 +6,9 @@ function R = run_sweep(p)
 %   (fill_index, dist_index, controller); controller order = R.laws.
 %   Also saved to results/sweep_results.mat.
 
+assert(all(isfinite([p.ctrl.D_lo, p.ctrl.D_hi, p.band.E_low])), ...
+    'run_sweep: p is uncalibrated - call p = calibrate_controller(p) first');
+
 laws = {'fixed', 'fill', 'difficulty'};
 f_grid = linspace(p.sweep.f_min, p.sweep.f_max, p.sweep.n_f);
 d_grid = linspace(p.sweep.d_min, p.sweep.d_max, p.sweep.n_d);
@@ -62,6 +65,15 @@ for c = 1:nc
 end
 fprintf(['  (over-asst = human effort below band, exo working harder than ' ...
     'needed;\n   under-sup = human effort above band, left straining)\n']);
+
+% Where the difficulty law's clamps bind (honest accounting of misses:
+% inside the clamps the closed-form law holds effort at E* exactly).
+a3 = R.alpha(:,:,3);
+lo = abs(a3 - p.ctrl.alpha_min) < 1e-9;
+hi = abs(a3 - p.ctrl.alpha_max) < 1e-9;
+fprintf(['difficulty law clamp binding: %.0f%% alpha_min-clamped, ' ...
+    '%.0f%% law-controlled, %.0f%% alpha_max-clamped\n'], ...
+    100*mean(lo(:)), 100*mean(~lo(:) & ~hi(:)), 100*mean(hi(:)));
 
 outdir = fullfile(fileparts(mfilename('fullpath')), 'results');
 if ~exist(outdir, 'dir'), mkdir(outdir); end

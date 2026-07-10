@@ -13,5 +13,6 @@ end
 addpath(fullfile(root, 'generated'));
 
 p = params();
+p = calibrate_controller(p);   % tune ramp + band floor on the held-out grid
 R = run_sweep(p);
 make_figures(R);

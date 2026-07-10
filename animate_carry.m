@@ -36,7 +36,7 @@ end
 addpath(fullfile(root, 'generated'));
 
 % ---- Simulate the task and all three controllers -------------------------
-p = params();
+p = calibrate_controller(params());
 traj = make_trajectory(d, p.sim.T_move, p.sim.dt, p);
 [tau_total, peak_slosh, slosh] = compute_required_torque(traj, f, p);
 D = compute_difficulty(traj.t, tau_total);
