@@ -34,10 +34,13 @@ p.slosh.zeta_s = 0.05;   % slosh damping ratio (fixed)
 
 % ---- Reach geometry -----------------------------------------------------
 % Start point of the carry (m, base frame at the shoulder-rotation axis).
+% Chosen so the elbow-down IK gives a natural pose: hand slightly below the
+% shoulder in front of the body, elbow flexion ~137 deg at the start (well
+% inside human ROM), relaxing toward ~50 deg at the farthest target.
 % The target is start + d*u_reach; u_reach is a unit vector, mostly radial
 % with a small tangential and upward component. All grid targets must stay
 % inside the arm workspace (asserted in make_trajectory).
-p.reach.start = [0.50; 0; -0.10];
+p.reach.start = [0.55; 0; -0.15];
 u = [0.94; 0.23; 0.25];
 p.reach.dir   = u / norm(u);
 
@@ -60,18 +63,20 @@ p.ctrl.alpha_min   = 0.2;   % lower bound for controllers 2 and 3
 p.ctrl.alpha_max   = 0.72;  % upper bound for controllers 2 and 3
 % Difficulty-adaptive ramp (controller 3): alpha rises linearly from
 % alpha_min at D_lo to alpha_max at D_hi, clamped. Tuned to the observed
-% difficulty range of the sweep, D in [3.27, 8.72] N m s (printed by
+% difficulty range of the sweep, D in [2.41, 9.62] N m s (printed by
 % run_sweep), so that (1-alpha(D))*D stays inside the target band.
-p.ctrl.D_lo = 3.2;    % N m s
-p.ctrl.D_hi = 8.8;    % N m s
+p.ctrl.D_lo = 2.4;    % N m s
+p.ctrl.D_hi = 9.7;    % N m s
 
 % ---- Target human-effort band (units of E_human, N m s) -----------------
 % The load-bearing assumption: below E_low = over-assisted (wasteful),
 % above E_high = under-supported. Precedent for a bounded, non-zero human
 % share: Zhang et al. 2024 (effort/deviation reward, bounded stiffness),
-% Bai et al. 2025 (perceptible retained share). Tuned together with
-% D_lo/D_hi: ~2.85 N m s is ~1 N m mean torque per joint over the 1 s
-% carry, a comfortable fraction of shoulder/elbow voluntary strength.
-p.band.E_low  = 2.3;
+% Bai et al. 2025 (perceptible retained share). E_high ~ 3.4 N m s is
+% ~1.1 N m mean torque per joint over the 1 s carry, a comfortable
+% fraction of shoulder/elbow voluntary strength. E_low sits just under
+% the lightest task at minimum assistance (0.8 * D_min = 1.93): any lower
+% floor would call even minimal help on the lightest task "over-assisted".
+p.band.E_low  = 1.9;
 p.band.E_high = 3.4;
 end

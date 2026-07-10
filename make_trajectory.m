@@ -32,7 +32,8 @@ end
 
 % ------------------------------------------------------------------------
 function q = ik_3dof(P, p)
-%Closed-form IK for the 3-DOF arm (elbow-up branch), asserted against the
+%Closed-form IK for the 3-DOF arm (elbow-DOWN branch: the elbow stays below
+%the shoulder, matching how a human carries a cup), asserted against the
 %forward kinematics exported by derive_dynamics.
 a = p.arm;
 th3 = atan2(P(2), P(1));                 % shoulder rotation (vertical axis)
@@ -42,7 +43,7 @@ rr  = hypot(r, z);
 assert(r > 0.05 && rr < 0.98*(a.L1 + a.L2) && rr > abs(a.L1 - a.L2) + 0.02, ...
     'ik_3dof: target [%g %g %g] outside comfortable workspace', P);
 c2  = (rr^2 - a.L1^2 - a.L2^2) / (2*a.L1*a.L2);
-th2 = -acos(max(-1, min(1, c2)));        % elbow-up in this convention
+th2 = acos(max(-1, min(1, c2)));         % elbow-down in this convention
 th1 = atan2(z, r) - atan2(a.L2*sin(th2), a.L1 + a.L2*cos(th2));
 q   = [th1; th2; th3];
 
