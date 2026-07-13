@@ -39,6 +39,16 @@ cl.Tend = 5.0;               % s (slosh decay time 1/(zeta_s*w_s) ~ 1.4 s)
 % ---- Metrics ---------------------------------------------------------------
 cl.tol_ee = 0.01;            % settle tolerance on end-effector error (m)
 
+% ---- Closed-loop grid evaluation (run_closed_loop_grid) --------------------
+% A coarse grid SPANNING THE EXTREMES of the sweep's task space - the laws
+% only disagree at the corners (fixed over-assists easy tasks, under-
+% supports hard ones), so a single mid-range task cannot separate them.
+% One closed-loop simulation per task per law; band status is the metric,
+% mirroring the sweep's primary question.
+cl.grid_f = [0.1, 0.55, 1.0];    % fill levels
+cl.grid_d = [0.1, 0.3, 0.5];     % reach distances (m)
+cl.Tend_grid = 2.0;              % s - carry + enough hold for band metrics
+
 % ---- Solver ----------------------------------------------------------------
 cl.solver  = 'ode45';
 cl.RelTol  = 1e-6;

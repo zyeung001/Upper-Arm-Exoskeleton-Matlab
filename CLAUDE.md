@@ -22,9 +22,11 @@ animate_carry(1.0, 0.5, Speed=0.25, Gif=true)
 derive_dynamics()       % force symbolic re-derivation + validation suite
 % Closed-loop Simulink validation (separate from the sweep; needs Simulink):
 addpath('closed_loop')
-run_closed_loop         % build .slx if missing -> simulate -> compare the
-                        % three alpha laws on measured torque + figures
+run_closed_loop         % single-task deep dive: 4 sims (3 laws + ideal
+                        % human), metrics table, controller + validation figs
 run_closed_loop(0.8, 0.4, Rebuild=true)   % force model rebuild
+run_closed_loop_grid    % THE closed-loop headline: 3x3 task grid x 3 laws
+                        % (27 sims, a few minutes) -> band-coverage figure
 animate_closed_loop     % animate the run in results/closed_loop_results.mat
 ```
 
@@ -75,8 +77,13 @@ literature, never tuned) while the exo responds instantly — this makes the
 laws, one simulation each, scored on the whiteboard metrics (RMSE, settle
 time, energy of u) plus human effort vs the band; a fourth ideal-human run
 (lag bypassed) is the validation cross-check, matching the sweep's (1−α)·D
-within ~1% with identical band verdicts. Headline finding: the law shifts
-who works (effort axis) while task metrics move only at the percent level.
+within ~1% with identical band verdicts. Single-task runs only separate the laws at grid extremes (mid-difficulty
+tasks coincide by construction), so `run_closed_loop_grid` asks the study's
+primary question in closed loop: band coverage over a 3×3 task grid
+spanning the corners — difficulty 8/9 in band vs fixed 3/9 and fill 3/9,
+mirroring the sweep's 98/61/51% headline (difficulty's one miss is the same
+easiest-corner task as in the sweep). Task metrics (RMSE etc.) move only at
+the percent level across laws: the law shifts who works, not the task.
 `build_closed_loop_model.m` is the reviewable source of truth for the
 gitignored `arm_closed_loop.slx`; constants live in `cl_params.m`; α is
 still computed A PRIORI per task via `controllers.m`.
