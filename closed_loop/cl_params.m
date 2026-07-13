@@ -18,6 +18,18 @@ function cl = cl_params()
 cl.Kp = diag([90 90 90]);    % N m / rad
 cl.Kd = diag([14 14 14]);    % N m s / rad
 
+% ---- Human torque-development lag -----------------------------------------
+% The human delivers their share through first-order dynamics
+%   tau_h * u_hum_dot = u_hum_cmd - u_hum
+% (surrogate for neuromuscular activation / torque-development dynamics,
+% effective time constants ~40-150 ms in the literature, cf. Zajac 1989);
+% the exo responds instantly by comparison. This is what makes the alpha
+% split DYNAMICALLY consequential in closed loop: laws that leave more
+% share on the human track worse. Fixed A PRIORI - never tuned to results.
+% The ideal-human run (lag bypassed) is also simulated as the cross-check
+% against the open-loop sweep.
+cl.tau_h = 0.10;             % s
+
 % ---- Simulation window ----------------------------------------------------
 % The carry itself lasts p.sim.T_move = 1 s; the reference then HOLDS the
 % target pose so the settling phase (slosh ring-down, residual tracking

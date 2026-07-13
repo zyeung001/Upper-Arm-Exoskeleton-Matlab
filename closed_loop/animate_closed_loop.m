@@ -27,7 +27,7 @@ if isempty(res)
         'animate_closed_loop: run run_closed_loop first (missing %s)', matfile);
     S = load(matfile);  res = S.res;
 end
-ca = res;    % single run: signals live directly on res
+ca = res.runs(res.i_adopt);   % animate the adopted (difficulty) law's run
 p  = res.p;
 
 % Resample to ~120 uniform frames

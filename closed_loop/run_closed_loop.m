@@ -1,27 +1,31 @@
 function res = run_closed_loop(f, d, opts)
-%RUN_CLOSED_LOOP Closed-loop Simulink validation of the assistance study.
+%RUN_CLOSED_LOOP Closed-loop Simulink comparison of the assistance laws.
 %   res = RUN_CLOSED_LOOP            default task (f = 0.8, d = 0.4)
 %   res = RUN_CLOSED_LOOP(f, d)      fill level f, reach distance d (m)
 %   res = RUN_CLOSED_LOOP(f, d, Rebuild=true)  force model rebuild
 %
-%   One closed-loop simulation per task: a PD + gravity-compensation
+%   The mentor's whiteboard, made consequential: a PD + gravity-comp
 %   controller tracks the sweep's quintic reference on the FULL nonlinear
-%   4-DOF plant (arm + slosh pendulum, out = sim("arm_closed_loop.slx")).
-%   The slosh starts at rest and is excited by the arm motion itself,
-%   exactly as in the open-loop sweep; it acts back on the arm as a true
-%   two-way disturbance (F_water in the mentor's diagram - its sign just
-%   says which way the liquid is currently pushing).
+%   4-DOF plant (out = sim("arm_closed_loop.slx")); the slosh starts at
+%   rest, is excited by the carry itself, and acts back on the arm as the
+%   F_water disturbance. The HUMAN delivers their (1-alpha) share through
+%   a first-order torque-development lag (cl_params.tau_h, a priori) while
+%   the exo responds instantly - so the alpha law changes the physics:
+%   laws that leave more share on the human track worse.
 %
-%   The MEASURED total torque u(t) is then split by the three alpha laws
-%   (fixed / fill / difficulty, controllers.m) - alpha is constant per
-%   task and computed A PRIORI from the reference trajectory - and the
-%   controllers are compared on the closed-loop measurements:
-%   cumulative/final human effort vs the target band, and peak human
-%   torque. Tracking metrics (RMSE, settle time, energy of u) are shared
-%   by all three laws since they split the same total.
+%   Four simulations per task:
+%     1-3. one per alpha law (fixed / fill / difficulty, lag active) -
+%          scored on the whiteboard metrics: Accuracy (RMSE), Time
+%          (settle), Energy of u, plus human effort vs the target band
+%          (carry window, band-comparable units).
+%     4.   ideal human (lag bypassed) - the validation cross-check that
+%          closed-loop effort reproduces the open-loop sweep's (1-alpha)*D.
+%
+%   alpha is constant per task and computed A PRIORI from the reference
+%   trajectory via controllers.m, exactly as in the sweep.
 %
 %   Figures -> results/figures/closed_loop_controllers.png (the comparison)
-%              results/figures/closed_loop_tracking.png    (context)
+%              results/figures/closed_loop_validation.png  (ideal-human check)
 %   Data    -> results/closed_loop_results.mat  (input to animate_closed_loop)
 
 arguments
@@ -58,8 +62,9 @@ pvec  = pack_pvec(p, m_s, L_s);
 D = compute_difficulty(traj.t, tau_total);
 
 laws = {'fixed', 'fill', 'difficulty'};
-alpha = zeros(1, numel(laws));
-for L = 1:numel(laws)
+nl = numel(laws);
+alpha = zeros(1, nl);
+for L = 1:nl
     [~, ~, alpha(L)] = controllers(laws{L}, tau_total, f, D, p);
 end
 i_adopt = find(strcmp(laws, 'difficulty'));
@@ -71,70 +76,77 @@ if ~exist(mdlfile, 'file') || opts.Rebuild
     build_closed_loop_model();
 end
 
-% ---- Simulate (slosh starts at rest, excited by the carry itself) ----------
+% ---- Simulate: one run per law (human lag), plus the ideal-human check -----
 q0 = traj.q(:, 1);
-in = Simulink.SimulationInput(mdl);
-in = in.setVariable('cl_Xref',   Xref);
-in = in.setVariable('cl_VelRef', VelRef);
-in = in.setVariable('cl_x0',    [q0; 0; zeros(4, 1)]);
-in = in.setVariable('cl_Kp',    cl.Kp);
-in = in.setVariable('cl_Kd',    cl.Kd);
-in = in.setVariable('cl_alpha', alpha(i_adopt));   % in-model split = adopted law
-in = in.setVariable('cl_pvec',  pvec);
-in = in.setVariable('cl_bs',    b_s);
-in = in.setVariable('cl_rigid', 0);
-in = in.setVariable('cl_Tend',  cl.Tend);
-out = sim(in);
+G0 = G_fun([q0; 0], pvec);   % human starts already holding their static share
+base = Simulink.SimulationInput(mdl);
+base = base.setVariable('cl_Xref',   Xref);
+base = base.setVariable('cl_VelRef', VelRef);
+base = base.setVariable('cl_x0',    [q0; 0; zeros(4, 1)]);
+base = base.setVariable('cl_Kp',    cl.Kp);
+base = base.setVariable('cl_Kd',    cl.Kd);
+base = base.setVariable('cl_pvec',  pvec);
+base = base.setVariable('cl_bs',    b_s);
+base = base.setVariable('cl_rigid', 0);
+base = base.setVariable('cl_tauh',  cl.tau_h);
+base = base.setVariable('cl_Tend',  cl.Tend);
 
-res.t   = out.y.Time.';
-res.q   = out.y.Data.';        % 3xN simulated joint angles
-res.err = out.err.Data.';      % 3xN joint tracking error
-res.u   = out.u.Data.';        % 3xN total torque (exo + human)
-res.phi = out.phi.Data(:).';   % 1xN slosh angle
-assert(numel(res.t) == size(res.err, 2) && numel(res.t) == numel(res.phi), ...
-    'run_closed_loop: logged signals disagree on time base');
-
-% ---- Metrics ------------------------------------------------------------------
-% Tracking metrics: law-independent (all laws split the same total u).
-res.metrics = cl_metrics(res.t, res.q, res.err, res.u, res.phi, tt, qref, pvec, cl);
-
-% Controller comparison on the MEASURED torque, over the carry window
-% (band-comparable units, same integration window as the sweep).
-win = res.t <= p.sim.T_move;
-res.E_cum = zeros(numel(laws), numel(res.t));
-for L = 1:numel(laws)
-    a = alpha(L);
-    res.law(L) = compute_metrics(res.t(win), ...
-        (1 - a) * res.u(:, win), a * res.u(:, win), p);
-    res.E_cum(L, :) = cumtrapz(res.t, (1 - a) * sum(abs(res.u), 1));
+win_fun = @(t) t <= p.sim.T_move;   % carry window (band-comparable)
+for L = 1:nl
+    in = base.setVariable('cl_alpha', alpha(L));
+    in = in.setVariable('cl_ideal', 0);
+    in = in.setVariable('cl_uh0', (1 - alpha(L)) * G0(1:3));
+    r = extract_run(sim(in), laws{L});
+    r.metrics = cl_metrics(r.t, r.q, r.err, r.u, r.phi, tt, qref, pvec, cl);
+    win = win_fun(r.t);
+    r.band  = compute_metrics(r.t(win), r.uhum(:, win), r.uexo(:, win), p);
+    r.E_cum = cumtrapz(r.t, sum(abs(r.uhum), 1));
+    res.runs(L) = r;
 end
+in = base.setVariable('cl_alpha', alpha(i_adopt));
+in = in.setVariable('cl_ideal', 1);
+in = in.setVariable('cl_uh0', zeros(3, 1));
+ideal = extract_run(sim(in), 'ideal human');
+ideal.metrics = cl_metrics(ideal.t, ideal.q, ideal.err, ideal.u, ideal.phi, ...
+    tt, qref, pvec, cl);
+win = win_fun(ideal.t);
+for L = 1:nl   % post-hoc split of the ideal run's measured total torque
+    a = alpha(L);
+    ideal.band(L) = compute_metrics(ideal.t(win), ...
+        (1 - a) * ideal.u(:, win), a * ideal.u(:, win), p);
+end
+res.ideal = ideal;
 
 % ---- Console report ------------------------------------------------------------
-astr = arrayfun(@(L) sprintf('%s = %.2f', laws{L}, alpha(L)), ...
-    1:numel(laws), 'UniformOutput', false);
-fprintf('\nClosed-loop validation: fill = %.2f, distance = %.2f m\n', f, d);
+astr = arrayfun(@(L) sprintf('%s = %.2f', laws{L}, alpha(L)), 1:nl, ...
+    'UniformOutput', false);
+fprintf('\nClosed-loop comparison: fill = %.2f, distance = %.2f m\n', f, d);
 fprintf('  difficulty D = %.2f N m s (a priori), alpha: %s\n', D, strjoin(astr, ', '));
-m = res.metrics;
-fprintf(['  tracking (all laws): RMSE = %.1f mm, peak = %.1f mm, ' ...
-    'settle = %.2f s, energy(u) = %.1f, peak slosh = %.1f deg\n'], ...
-    1e3*m.rmse_ee, 1e3*m.max_ee, m.t_settle, m.energy_u, rad2deg(m.peak_slosh));
+fprintf('  human torque lag tau_h = %.0f ms; exo instantaneous\n', 1e3 * cl.tau_h);
 fprintf('  target human-effort band = [%.2f, %.2f] N m s (carry window)\n\n', ...
     p.band.E_low, p.band.E_high);
-status_str = {'BELOW band (over-assisted, wasteful)', 'in band', ...
-              'ABOVE band (under-supported)'};
-fprintf('  %-12s %6s %9s %9s %8s %12s   %s\n', 'controller', 'alpha', ...
-    'E_human', 'open-loop', 'E_exo', 'pk tau_hum', 'band status');
-for L = 1:numel(laws)
-    ml = res.law(L);
-    fprintf('  %-12s %6.2f %9.2f %9.2f %8.2f %9.1f N m   %s\n', laws{L}, ...
-        alpha(L), ml.E_human, (1 - alpha(L)) * D, ml.E_exo, ...
-        ml.tau_pk_human, status_str{ml.status + 2});
+status_str = {'BELOW band', 'in band', 'ABOVE band'};
+fprintf('  %-12s %6s %9s %11s %9s %9s %10s   %s\n', 'controller', 'alpha', ...
+    'E_human', 'pk tau_hum', 'RMSE_ee', 't_settle', 'energy(u)', 'band status');
+for L = 1:nl
+    r = res.runs(L);
+    fprintf('  %-12s %6.2f %9.2f %8.1f Nm %6.1f mm %7.2f s %10.1f   %s\n', ...
+        r.name, alpha(L), r.band.E_human, r.band.tau_pk_human, ...
+        1e3 * r.metrics.rmse_ee, r.metrics.t_settle, r.metrics.energy_u, ...
+        status_str{r.band.status + 2});
+end
+fprintf('\n  Validation, ideal human (RMSE %.1f mm; compare open-loop E = (1-a)*D):\n', ...
+    1e3 * res.ideal.metrics.rmse_ee);
+for L = 1:nl
+    fprintf('  %-12s closed-loop %5.2f | open-loop %5.2f | %s\n', laws{L}, ...
+        res.ideal.band(L).E_human, (1 - alpha(L)) * D, ...
+        status_str{res.ideal.band(L).status + 2});
 end
 fprintf('\n');
 
 % ---- Package + save --------------------------------------------------------------
 res.f = f;  res.d = d;  res.D = D;
-res.laws = laws;  res.alpha = alpha;
+res.laws = laws;  res.alpha = alpha;  res.i_adopt = i_adopt;
 res.tt = tt;  res.qref = qref;  res.traj = traj;
 res.pvec = pvec;  res.p = p;  res.cl = cl;
 
@@ -146,4 +158,20 @@ fprintf('Saved %s\n', fullfile(resdir, 'closed_loop_results.mat'));
 if opts.Figures
     cl_figures(res, fullfile(resdir, 'figures'));
 end
+end
+
+% ------------------------------------------------------------------------
+function r = extract_run(out, name)
+% Pull logged signals out of a SimulationOutput into plain arrays (3xN/1xN).
+r.name = name;
+r.t    = out.y.Time.';
+r.q    = out.y.Data.';
+r.err  = out.err.Data.';
+r.u    = out.u.Data.';       % applied total torque (exo + human delivered)
+r.ucmd = out.ucmd.Data.';    % commanded total (PD + gravity comp)
+r.uexo = out.uexo.Data.';
+r.uhum = out.uhum.Data.';    % human torque as DELIVERED (after lag/bypass)
+r.phi  = out.phi.Data(:).';
+assert(numel(r.t) == size(r.err, 2) && numel(r.t) == numel(r.phi), ...
+    'run_closed_loop: logged signals disagree on time base');
 end

@@ -65,17 +65,21 @@ between `params` and the generated functions; if you change the symbolic
 parameter list in `derive_dynamics.m`, you must change `pack_pvec.m` to match.
 
 `closed_loop/` (mentor-requested, 2026-07-13) is a SEPARATE closed-loop
-Simulink validation: a PD + gravity-compensation controller tracks the same
+Simulink study: a PD + gravity-compensation controller tracks the same
 quintic reference on the full nonlinear 4-DOF plant, with the slosh starting
 at rest and excited by the carry itself (a true two-way disturbance). The
-COMPARISON AXIS is the three alpha laws scored on the measured closed-loop
-torque (cumulative/final human effort vs the band, momentary human demand);
-tracking metrics (RMSE, settle, energy of u) are law-independent context
-since all laws split the same total. `build_closed_loop_model.m` is the
-reviewable source of truth for the gitignored `arm_closed_loop.slx`;
-constants live in `cl_params.m`; α is still computed A PRIORI per task via
-`controllers.m`. Cross-check: closed-loop E_human matches the sweep's
-(1−α)·D within ~1% with identical band verdicts.
+human delivers their (1−α) share through a first-order torque-development
+lag (`cl_params.tau_h` = 100 ms, fixed a priori from the neuromuscular
+literature, never tuned) while the exo responds instantly — this makes the
+α law dynamically consequential. The COMPARISON AXIS is the three alpha
+laws, one simulation each, scored on the whiteboard metrics (RMSE, settle
+time, energy of u) plus human effort vs the band; a fourth ideal-human run
+(lag bypassed) is the validation cross-check, matching the sweep's (1−α)·D
+within ~1% with identical band verdicts. Headline finding: the law shifts
+who works (effort axis) while task metrics move only at the percent level.
+`build_closed_loop_model.m` is the reviewable source of truth for the
+gitignored `arm_closed_loop.slx`; constants live in `cl_params.m`; α is
+still computed A PRIORI per task via `controllers.m`.
 
 ## Design invariants — do not casually break these
 
