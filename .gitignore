@@ -29,3 +29,6 @@ Thumbs.db
 .vscode/
 .idea/
 results/figures/*.gif
+
+# Closed-loop Simulink model (rebuilt by closed_loop/build_closed_loop_model.m)
+closed_loop/arm_closed_loop.slx
