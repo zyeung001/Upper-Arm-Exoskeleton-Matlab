@@ -170,6 +170,86 @@ Robustness studies (reported in Results, but the *procedure* belongs in Methods)
   A schedule-shape failure, not a difficulty-signal failure. This is WHY the
   closed-form law was adopted (Decision B, revised).
 
+## 7b. Closed-loop study (`closed_loop/`, mentor-requested) — the ONLY source of tracking claims
+
+A self-contained Simulink study, separate from the sweep and never feeding back
+into it. A PD + gravity-compensation controller (Kp = 90, Kd = 14, diagonal)
+tracks the same quintic reference on the FULL nonlinear 4-DOF plant; the slosh
+starts at rest and is excited by the carry itself (a genuine two-way
+disturbance). α is still computed a priori per task by `controllers.m`.
+
+Two human-model elements, both fixed a priori, never tuned:
+- **Torque-development lag** τ_h = 100 ms (first-order; neuromuscular activation
+  surrogate, cf. Zajac 1989). The exo responds instantly; the human does not.
+- **Strength cap** u_h_max = κ·MVC, MVC = [50, 45, 30] N·m for [shoulder flexion,
+  elbow flexion, shoulder rotation]. Implemented as saturation on the lag
+  integrator's *state* (activation ≤ 1 ⇒ no windup). The exo is uncapped.
+
+**Why the cap matters (the answer to "why don't RMSE/settle/energy differ?").**
+All three laws command the same *total* torque; α only decides who supplies it.
+With an unlimited human, the task therefore looks identical under every law and
+only the effort band separates them — correct, but it leaves the reviewer's
+obvious objection ("maybe the human just gets tired, who cares") unanswered.
+With a cap, a law that demands more than the user has simply does not get it:
+the applied torque falls short, and the task degrades. The binding constraint is
+the **static hold** at the target, not the dynamic peak during the carry — an
+over-demanded human can never null the error, so the arm droops permanently
+(t_settle = NaN). Single task (f = 1.0, d = 0.5, κ = 8 %): fixed sits at its cap
+79 % of the run, 2.8 N·m of demanded torque is never delivered, RMSE 14.6 mm and
+it never settles; fill and difficulty track at 7.7 mm and settle at 1.16 s.
+
+**Scoring rule (load-bearing).** A task passes only if human effort is **in band
+AND the human never hit the cap**. Both halves are required: capping *deflates*
+measured effort, so a law can otherwise be scored "in band" *because* the human
+failed to deliver what it demanded. Report raw in-band coverage as a disclosed
+secondary, never as the headline.
+
+**Critical κ — the tuning-free claim.** Each law has an a-priori *critical κ*:
+the weakest user it never over-demands, = max over tasks/joints of
+|(1−α)·τ_j| / MVC_j, computed from inverse dynamics on the **calibration grid
+only** (`cl_critical_kappa.m`; no simulation, no evaluation data — the train/test
+split holds). Result: **fixed 9.1 %, fill 8.5 %, difficulty 6.4 % MVC** — the
+difficulty law serves a user ~30 % weaker than fixed can. This is a property of
+each law, not a parameter anyone picked. NEVER choose a κ because it makes a law
+win; that is why the headline is the κ *sweep* (`run_kappa_sweep`, 5 κ × 9 tasks
+× 3 laws), evaluated on the held-out grid, and why κ = 8 % is presented as a
+disclosed representative scenario rather than a privileged one.
+
+Closed-loop κ sweep (3×3 evaluation grid at each κ; pass = in band AND within
+strength; overloaded = tasks demanding more torque than the user has, of 9):
+
+| κ (% MVC) | fixed pass / overloaded | fill | difficulty |
+|---|---|---|---|
+| 5.0 | 11 % / 5 | 0 % / 5 | 22 % / 6 |
+| 6.5 | 22 % / 4 | 22 % / 3 | 67 % / 2 |
+| 8.0 | 33 % / 2 | 33 % / 2 | **89 % / 0** |
+| 9.5 | 33 % / 1 | 33 % / 1 | **89 % / 0** |
+| 11.0 | 33 % / 0 | 33 % / 0 | **89 % / 0** |
+
+Mean end-effector RMSE falls with κ and converges (~5.6–5.7 mm) once nobody is
+over-demanded — i.e. **the accuracy cost is entirely attributable to overload**,
+not to the assistance law per se. That is the cleanest form of the claim: the
+difficulty law does not track better because it is a better tracker; it tracks
+better because it never asks the user for torque they do not have.
+
+Two caveats to state, not hide:
+- **The measured zero-overload point sits ~1.5–2 points right of each law's
+  predicted critical κ** (difficulty 8 % vs 6.4 %; fixed 11 % vs 9.1 %). Two
+  causes, both expected: the evaluation grid extends *beyond* the calibration
+  extremes (that is the train/test split working as designed), and closed-loop
+  PD demand exceeds the open-loop feedforward the prediction was computed from.
+  The *ordering and spacing* of the laws are preserved exactly — which is the
+  claim. Present critical κ as a rank-ordering prediction, not a threshold to
+  be read off to two decimals.
+- **At κ = 5 % (below every law's critical κ) all three laws overload, the
+  difficulty law most often (6/9)** — on easy carries its α floor deliberately
+  leaves the human more work. The claim is "serves a substantially weaker user,"
+  never "serves an arbitrarily weak user."
+
+**Validation cross-check.** A fourth run per task with the lag bypassed and the
+cap removed ("ideal human") reproduces the open-loop sweep's (1−α)·D within ~1 %
+with identical band verdicts — the closed loop and the sweep agree.
+
 ## 8. Nominal results (for context; belongs in Results, not Methods)
 
 - Coverage on the 100 evaluation tasks: **difficulty-adaptive 98%, fill-only
@@ -187,9 +267,11 @@ Robustness studies (reported in Results, but the *procedure* belongs in Methods)
 
 1. **Simulation-only study.** No human subjects, no hardware. Never imply
    otherwise.
-2. **No tracking claims.** There is deliberately no feedback tracking loop; the
-   arm follows the reference by construction. Every claim is about effort
-   distribution. Do not report or imply tracking performance.
+2. **No tracking claims *from the sweep*.** The 10×10 sweep deliberately has no
+   feedback loop; the arm follows the reference by construction, so every claim
+   drawn from it is about effort distribution. Tracking results come *only* from
+   the closed-loop Simulink study (§7b), and must be attributed to it explicitly.
+   Never let a closed-loop RMSE migrate into a sentence about the sweep.
 3. **Band values are design constants.** The band *concept* has precedent
    (Zhang: bounded stiffness + effort term; Bai: perceptible retained share);
    the numbers 2.2/3.4 do not. Defense pattern (reuse for clamps too): fixed
@@ -207,6 +289,15 @@ Robustness studies (reported in Results, but the *procedure* belongs in Methods)
 7. Units: D and E_human/E_exo/E\*/band in N·m·s; torques in N·m; write alpha as
    α consistently; "in band / over-assisted / under-supported" is the canonical
    status terminology.
+8. **MVC and κ are modelling assumptions, and κ is a *scenario*, not a result.**
+   The MVC vector is order-of-magnitude, not measured; say so. Present the
+   strength cap as "what if the wearer is weak," never as a calibrated human
+   model. The defensible quantity is each law's *critical κ* (a property of the
+   law, computed a priori on calibration data); the defensible presentation is
+   the κ sweep. Quoting a single κ that happens to separate the laws, without
+   the sweep beside it, would be results-tuning — do not do it. Note explicitly
+   that at κ = 5 % the adopted law also over-demands the user: the claim is
+   "serves a substantially weaker user," not "serves any user."
 
 ## 10. Citations (the only two external sources)
 
@@ -239,6 +330,13 @@ Robustness studies (reported in Results, but the *procedure* belongs in Methods)
 | `animate_carry.m` | single-carry animation demo (not part of the evaluation) |
 | `main.m` | pipeline: derive (once) → calibrate → sweep → figures |
 | `README.md` | prose overview incl. "How to read the results" per figure |
+| `closed_loop/cl_params.m` | closed-loop constants: PD gains, τ_h, MVC, κ, κ sweep |
+| `closed_loop/build_closed_loop_model.m` | source of truth for the gitignored `.slx` |
+| `closed_loop/cl_critical_kappa.m` | **critical κ per law** (a priori, calibration grid) |
+| `closed_loop/cl_overload.m` | strength-cap saturation detection (whole run, time-weighted) |
+| `closed_loop/run_closed_loop.m` | single-task deep dive: 3 laws + ideal-human cross-check |
+| `closed_loop/run_closed_loop_grid.m` | 3×3 grid × 3 laws at one κ (pass = in band AND within strength) |
+| `closed_loop/run_kappa_sweep.m` | **the closed-loop headline**: grid × 5 κ |
 
 Run `main` in MATLAB (Symbolic Math Toolbox required, R2026a) to regenerate
 `results/sweep_results.mat` and `results/figures/*.png`.

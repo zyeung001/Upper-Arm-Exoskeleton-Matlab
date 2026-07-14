@@ -25,8 +25,11 @@ addpath('closed_loop')
 run_closed_loop         % single-task deep dive: 4 sims (3 laws + ideal
                         % human), metrics table, controller + validation figs
 run_closed_loop(0.8, 0.4, Rebuild=true)   % force model rebuild
-run_closed_loop_grid    % THE closed-loop headline: 3x3 task grid x 3 laws
-                        % (27 sims, a few minutes) -> band-coverage figure
+run_closed_loop_grid    % 3x3 task grid x 3 laws (27 sims, a few minutes) ->
+                        % coverage + accuracy figure at the default strength
+run_kappa_sweep         % THE closed-loop headline: the grid repeated at 5
+                        % user strengths (135 sims, ~10 min) -> pass rate,
+                        % overload and RMSE vs how weak the user is
 animate_closed_loop     % animate the run in results/closed_loop_results.mat
 ```
 
@@ -76,16 +79,33 @@ literature, never tuned) while the exo responds instantly — this makes the
 α law dynamically consequential. The COMPARISON AXIS is the three alpha
 laws, one simulation each, scored on the whiteboard metrics (RMSE, settle
 time, energy of u) plus human effort vs the band; a fourth ideal-human run
-(lag bypassed) is the validation cross-check, matching the sweep's (1−α)·D
-within ~1% with identical band verdicts. Single-task runs only separate the laws at grid extremes (mid-difficulty
-tasks coincide by construction), so `run_closed_loop_grid` asks the study's
-primary question in closed loop: band coverage over a 3×3 task grid
-spanning the corners — difficulty 8/9 in band vs fixed 3/9 and fill 3/9,
-mirroring the sweep's 98/61/51% headline (difficulty's one miss is the same
-easiest-corner task as in the sweep). Task metrics (RMSE etc.) move only at
-the percent level across laws: the law shifts who works, not the task.
+(lag bypassed, uncapped) is the validation cross-check, matching the sweep's
+(1−α)·D within ~1% with identical band verdicts.
+
+The human also has a **strength cap** (`cl_params.u_h_max` = κ·MVC, a
+saturation on the lag integrator's *state* — activation cannot exceed 1, so
+there is no windup; the exo is uncapped). This is what makes the α law
+change the *task* and not just who gets tired: a law that demands more
+torque than the user has simply does not get it, the applied total falls
+short, and tracking degrades. The binding constraint is usually the **static
+hold** at the target, not the dynamic peak during the carry — an overloaded
+human can never null the error, so the arm droops permanently (`t_settle` =
+NaN). This is where the mentor's accuracy metric finally discriminates.
+Scoring rule: a task PASSES only if human effort is **in band AND the human
+never hit the cap** — capping *deflates* measured effort, so in-band alone
+could be "passed" by overloading the user.
+
+κ is a *scenario* (who wears the exo), never tuned to results. Each law has
+an a-priori **critical κ** — the weakest user it never over-demands, from
+inverse dynamics on the **calibration grid only**: fixed 9.1 %, fill 8.5 %,
+difficulty 6.4 % MVC. So the difficulty law serves a ~30 % weaker user than
+fixed can. `run_kappa_sweep` (the headline) tests that prediction on the
+held-out evaluation grid across five κ, so no single κ is privileged;
+`run_closed_loop_grid` is one κ slice of it. Single-task runs only separate
+the laws at grid extremes — mid-difficulty tasks coincide by construction.
 `build_closed_loop_model.m` is the reviewable source of truth for the
-gitignored `arm_closed_loop.slx`; constants live in `cl_params.m`; α is
+gitignored `arm_closed_loop.slx` (`cl_needs_rebuild` rebuilds it when the
+builder or `cl_params.m` is newer); constants live in `cl_params.m`; α is
 still computed A PRIORI per task via `controllers.m`.
 
 ## Design invariants — do not casually break these
@@ -107,7 +127,12 @@ them); each is documented in code comments where it lives:
 - **A-priori quantities stay a priori.** `p.band.E_high = 3.4` and the clamps
   `alpha ∈ [0.2, 0.72]` are fixed before any results and never adjusted to fit
   them. E* (the adopted law's target) is the band midpoint, hence also fixed
-  pre-evaluation.
+  pre-evaluation. In `closed_loop/`, `tau_h`, `MVC` and the strength fraction
+  κ are the same kind of quantity: κ describes the *user*, not the controller.
+  **Never pick a κ because it makes a law win** — that is why the headline is
+  `run_kappa_sweep` (a curve over five κ) and why the κ range is derived from
+  calibration-grid demands only. If you need a single number to quote, quote a
+  law's *critical κ*, which is a property of the law, not a choice.
 - **NaN sentinels.** `D_lo/D_hi/E_low` are NaN until `calibrate_controller`
   fills them; `run_sweep` asserts they are set. Keep that failure mode.
 - **`'difficulty'` is the adopted controller; `'difficulty-linear'` is a

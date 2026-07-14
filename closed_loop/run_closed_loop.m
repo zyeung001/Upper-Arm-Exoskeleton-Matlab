@@ -72,13 +72,14 @@ i_adopt = find(strcmp(laws, 'difficulty'));
 % ---- Model ------------------------------------------------------------------
 mdl = 'arm_closed_loop';
 mdlfile = fullfile(here, [mdl '.slx']);
-if ~exist(mdlfile, 'file') || opts.Rebuild
+if cl_needs_rebuild(mdlfile) || opts.Rebuild
     build_closed_loop_model();
 end
 
-% ---- Simulate: one run per law (human lag), plus the ideal-human check -----
+% ---- Simulate: one run per law (lag + strength cap), + the ideal check -----
 q0 = traj.q(:, 1);
 G0 = G_fun([q0; 0], pvec);   % human starts already holding their static share
+cap = cl.u_h_max(:);
 base = Simulink.SimulationInput(mdl);
 base = base.setVariable('cl_Xref',   Xref);
 base = base.setVariable('cl_VelRef', VelRef);
@@ -89,17 +90,29 @@ base = base.setVariable('cl_pvec',  pvec);
 base = base.setVariable('cl_bs',    b_s);
 base = base.setVariable('cl_rigid', 0);
 base = base.setVariable('cl_tauh',  cl.tau_h);
+base = base.setVariable('cl_uhmax', cap);
 base = base.setVariable('cl_Tend',  cl.Tend);
 
 win_fun = @(t) t <= p.sim.T_move;   % carry window (band-comparable)
 for L = 1:nl
     in = base.setVariable('cl_alpha', alpha(L));
     in = in.setVariable('cl_ideal', 0);
-    in = in.setVariable('cl_uh0', (1 - alpha(L)) * G0(1:3));
+    % Lag integrator starts at the human's static gravity share, clamped
+    % into the cap (a user too weak to even hold the pose starts AT it).
+    in = in.setVariable('cl_uh0', ...
+        max(-cap, min(cap, (1 - alpha(L)) * G0(1:3))));
     r = extract_run(sim(in), laws{L});
-    r.metrics = cl_metrics(r.t, r.q, r.err, r.u, r.phi, tt, qref, pvec, cl);
+    r.ucmd_hum = (1 - alpha(L)) * r.ucmd;   % what the law ASKED of the human
+    r.metrics  = cl_metrics(r.t, r.q, r.err, r.u, r.phi, tt, qref, pvec, cl);
+    r.metrics.energy_ucmd = trapz(r.t, sum(r.ucmd.^2, 1));
     win = win_fun(r.t);
-    r.band  = compute_metrics(r.t(win), r.uhum(:, win), r.uexo(:, win), p);
+    r.band = compute_metrics(r.t(win), r.uhum(:, win), r.uexo(:, win), p);
+    r.over = cl_overload(r.t, r.uhum, r.ucmd_hum, win, cl);
+    % The verdict: assistance is right only if the human's effort lands in
+    % the band AND they were never asked for more than they can produce.
+    % A capped human's measured effort is DEFLATED by their own failure, so
+    % in-band alone could be "passed" by overloading them - hence the AND.
+    r.ok    = (r.band.status == 0) && ~r.over.overload;
     r.E_cum = cumtrapz(r.t, sum(abs(r.uhum), 1));
     res.runs(L) = r;
 end
@@ -123,18 +136,33 @@ astr = arrayfun(@(L) sprintf('%s = %.2f', laws{L}, alpha(L)), 1:nl, ...
 fprintf('\nClosed-loop comparison: fill = %.2f, distance = %.2f m\n', f, d);
 fprintf('  difficulty D = %.2f N m s (a priori), alpha: %s\n', D, strjoin(astr, ', '));
 fprintf('  human torque lag tau_h = %.0f ms; exo instantaneous\n', 1e3 * cl.tau_h);
+fprintf(['  human strength cap = %.0f%% MVC -> [%.1f %.1f %.1f] N m per joint\n'], ...
+    100 * cl.kappa, cl.u_h_max);
 fprintf('  target human-effort band = [%.2f, %.2f] N m s (carry window)\n\n', ...
     p.band.E_low, p.band.E_high);
 status_str = {'BELOW band', 'in band', 'ABOVE band'};
-fprintf('  %-12s %6s %9s %11s %9s %9s %10s   %s\n', 'controller', 'alpha', ...
-    'E_human', 'pk tau_hum', 'RMSE_ee', 't_settle', 'energy(u)', 'band status');
+fprintf('  %-12s %6s %9s %9s %9s %10s  %-11s %s\n', 'controller', 'alpha', ...
+    'E_human', 'RMSE_ee', 't_settle', 'energy(u)', 'band', 'human at cap?');
 for L = 1:nl
     r = res.runs(L);
-    fprintf('  %-12s %6.2f %9.2f %8.1f Nm %6.1f mm %7.2f s %10.1f   %s\n', ...
-        r.name, alpha(L), r.band.E_human, r.band.tau_pk_human, ...
+    if r.over.hold_capped
+        ostr = sprintf('AT CAP %2.0f%% of run, incl. the hold (deficit %.1f Nm)', ...
+            100 * r.over.duty, r.over.deficit);
+    elseif r.over.overload
+        ostr = sprintf('AT CAP %2.0f%% of run (deficit %.1f Nm)', ...
+            100 * r.over.duty, r.over.deficit);
+    else
+        ostr = 'within strength';
+    end
+    fprintf('  %-12s %6.2f %9.2f %6.1f mm %7.2f s %10.1f  %-11s %s\n', ...
+        r.name, alpha(L), r.band.E_human, ...
         1e3 * r.metrics.rmse_ee, r.metrics.t_settle, r.metrics.energy_u, ...
-        status_str{r.band.status + 2});
+        status_str{r.band.status + 2}, ostr);
 end
+ok_str = {'FAIL', 'PASS'};
+fprintf('\n  Verdict (in band AND within strength): %s\n', strjoin( ...
+    arrayfun(@(L) sprintf('%s = %s', laws{L}, ok_str{res.runs(L).ok + 1}), ...
+    1:nl, 'UniformOutput', false), ',  '));
 fprintf('\n  Validation, ideal human (RMSE %.1f mm; compare open-loop E = (1-a)*D):\n', ...
     1e3 * res.ideal.metrics.rmse_ee);
 for L = 1:nl
