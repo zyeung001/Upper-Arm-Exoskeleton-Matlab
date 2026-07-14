@@ -30,6 +30,40 @@ cl.Kd = diag([14 14 14]);    % N m s / rad
 % against the open-loop sweep.
 cl.tau_h = 0.10;             % s
 
+% ---- Human strength cap (what makes the alpha law change the TASK) ---------
+% The human is not an unlimited torque source: they can deliver at most
+% u_h_max per joint. Beyond it the demanded share is simply not produced,
+% the applied total falls short of what the task needs, and tracking
+% degrades - so under-support stops being merely "tiring" and becomes a
+% performance failure. Implemented as a saturation on the lag integrator's
+% STATE (muscle activation cannot exceed 1), which bounds the delivered
+% torque without integrator windup; the exo is unbounded by comparison.
+%
+% MVC = healthy maximum voluntary isometric torque, in the joint order of
+% params.m: th1 shoulder flexion, th2 elbow flexion, th3 shoulder rotation
+% about the vertical axis. Order-of-magnitude adult values.
+cl.MVC = [50; 45; 30];       % N m
+%
+% kappa = the user's strength as a fraction of MVC - a SCENARIO parameter
+% describing WHO wears the exo (a weakened user), never a tuned one. The
+% headline is the kappa SWEEP, not any single value; cl.kappa is only the
+% representative scenario for the single-task run and the grid table.
+cl.kappa   = 0.08;                    % ~8% MVC: a severely weakened user
+cl.u_h_max = cl.kappa * cl.MVC;       % N m per joint (3x1)
+%
+% Sweep range, set by a rule on CALIBRATION-GRID data only (the train/test
+% split holds: the evaluation grid is never consulted to choose it). A law's
+% A-PRIORI CRITICAL KAPPA - the weakest user it never over-demands on any
+% calibration task, max_task max_joint |(1-alpha)*tau_j| / MVC_j - is 9.1%
+% (fixed), 8.5% (fill), 6.4% (difficulty). The sweep straddles that window,
+% from "the cap binds every law" to "it binds none". Those critical kappas
+% are themselves the tuning-free result: the difficulty law never
+% over-demands a user ~30% weaker than the fixed law can serve.
+cl.kappa_sweep = [0.05, 0.065, 0.08, 0.095, 0.11];
+%
+% A joint counts as saturated within this relative tolerance of the cap.
+cl.sat_tol = 1e-3;
+
 % ---- Simulation window ----------------------------------------------------
 % The carry itself lasts p.sim.T_move = 1 s; the reference then HOLDS the
 % target pose so the settling phase (slosh ring-down, residual tracking

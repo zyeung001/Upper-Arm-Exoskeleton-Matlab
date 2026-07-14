@@ -11,7 +11,10 @@ function mdlfile = build_closed_loop_model()
 %       Controller outputs: ucmd (PD + gravity total), uexo = alpha*ucmd,
 %                           uhumc = (1-alpha)*ucmd (commanded human share)
 %     Human lag: tau_h*uh' = uhumc - uh  (Sum_lag -> Gain 1/tau_h -> 1/s),
-%       bypassed by Switch_h when cl_ideal >= 0.5 (ideal-human run).
+%       with the integrator STATE saturated at +/- cl_uhmax (the human's
+%       per-joint strength cap - no windup), bypassed by Switch_h when
+%       cl_ideal >= 0.5 (the ideal-human run, uncapped and lag-free, which
+%       is what keeps the open-loop cross-check exact).
 %     Sum_apply: u = uexo + uh_applied --> [Plant MATLAB Function:
 %       M qdd + C qd + G = [u; F_water]] --> 1/s --> x
 %       x(1:3) = q feeds back (-) into Sum_e; x(5:7) = qd into Sum_ed
@@ -21,7 +24,9 @@ function mdlfile = build_closed_loop_model()
 %   Everything tunable enters through base-workspace variables set per run
 %   by Simulink.SimulationInput (run_closed_loop.m): cl_Xref, cl_VelRef,
 %   cl_x0, cl_Kp, cl_Kd, cl_alpha, cl_pvec, cl_bs, cl_rigid, cl_Tend,
-%   cl_tauh, cl_ideal, cl_uh0.
+%   cl_tauh, cl_ideal, cl_uh0, cl_uhmax. Because the strength cap is a
+%   dialog parameter referencing a workspace variable, the kappa sweep
+%   needs no model rebuild.
 
 mdl = 'arm_closed_loop';
 here = fileparts(mfilename('fullpath'));
@@ -72,12 +77,23 @@ cfgC.FunctionScript = sprintf([ ...
     'end\n']);
 
 % ---- Human torque-development lag: tau_h*uh'' = uhumc - uh -----------------
+% ...with the human's STRENGTH CAP as a saturation on the integrator state
+% (|uh_j| <= cl_uhmax_j, elementwise). Saturating the state, rather than the
+% integrator's output, is both the right physiology (activation saturates,
+% it does not keep accumulating) and the right numerics: a limited
+% integrator zeroes the outward derivative at the limit, so there is no
+% windup and recovery is immediate once demand falls back under the cap.
+% The exo has no cap - that asymmetry is the whole point.
 add_block('simulink/Math Operations/Sum', [mdl '/Sum_lag'], ...
     'Inputs', '+-', 'IconShape', 'round', 'Position', [470 295 495 320]);
 add_block('simulink/Math Operations/Gain', [mdl '/Gain_lag'], ...
     'Gain', '1/cl_tauh', 'Position', [520 292 560 322]);
 add_block('simulink/Continuous/Integrator', [mdl '/Integrator_h'], ...
-    'InitialCondition', 'cl_uh0', 'Position', [585 292 615 322]);
+    'InitialCondition', 'cl_uh0', ...
+    'LimitOutput', 'on', ...
+    'UpperSaturationLimit', 'cl_uhmax', ...
+    'LowerSaturationLimit', '-cl_uhmax', ...
+    'Position', [585 292 615 322]);
 % Ideal-human bypass: pass the commanded share straight through
 add_block('simulink/Signal Routing/Switch', [mdl '/Switch_h'], ...
     'Criteria', 'u2 >= Threshold', 'Threshold', '0.5', ...
