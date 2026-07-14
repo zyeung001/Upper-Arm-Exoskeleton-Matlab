@@ -25,24 +25,26 @@ addpath('closed_loop')
 run_closed_loop         % single-task deep dive: 4 sims (3 laws + ideal
                         % human), metrics table, controller + validation figs
 run_closed_loop(0.8, 0.4, Rebuild=true)   % force model rebuild
-run_closed_loop_grid    % 3x3 task grid x 3 laws (27 sims, a few minutes) ->
+run_closed_loop_grid    % 3x3 task grid x 3 laws (27 sims, ~5 min) ->
                         % coverage + accuracy figure at the default strength
+run_closed_loop_grid(Kappa=0.095)         % same grid, other user strength
 run_kappa_sweep         % THE closed-loop headline: the grid repeated at 5
-                        % user strengths (135 sims, ~10 min) -> pass rate,
+                        % user strengths (135 sims, ~30 min) -> pass rate,
                         % overload and RMSE vs how weak the user is
 animate_closed_loop     % animate the run in results/closed_loop_results.mat
 ```
 
 From a shell: `matlab -batch "main"` (figures are created hidden under `-batch`).
 Requires the Symbolic Math Toolbox (developed on R2026a). Outputs go to
-`results/sweep_results.mat` and `results/figures/*.png` (both gitignored).
+`results/*.mat` (`sweep_results`, `closed_loop_results`, `closed_loop_grid`,
+`closed_loop_kappa`) and `results/figures/*.png` (all gitignored).
 
 There is no separate test runner. The validation suite (model reductions to
 independently derived 3/2/1-DOF models, mass-matrix symmetry/PD, Ṁ−2C
 skew-symmetry, free-swing energy conservation) runs automatically inside
 `derive_dynamics` at every derivation and fails via `assert`/`error`.
 
-Two caches to know about:
+Three caches to know about:
 - `generated/` — numeric functions exported from the symbolic derivation
   (M_fun, C_fun, G_fun, V_fun, ee_fun, aee_fun). `main` skips derivation if it
   exists. **After editing `derive_dynamics.m`, delete `generated/`** (or call
@@ -50,6 +52,10 @@ Two caches to know about:
 - `results/calibration.mat` — the 25-task calibration sweep, keyed on every
   physics/grid/bound parameter and auto-invalidated when any of them changes
   (`calibrate_controller.m`). No manual action needed after editing `params.m`.
+- `closed_loop/arm_closed_loop.slx` — build artifact of
+  `build_closed_loop_model.m`. Auto-rebuilt by the runners when the builder or
+  `cl_params.m` is newer (`cl_needs_rebuild.m` — note `exist(f,'file')` returns
+  4, not 2, for a `.slx`; use `isfile`). `Rebuild=true` forces it.
 
 ## Architecture
 
@@ -97,15 +103,22 @@ could be "passed" by overloading the user.
 
 κ is a *scenario* (who wears the exo), never tuned to results. Each law has
 an a-priori **critical κ** — the weakest user it never over-demands, from
-inverse dynamics on the **calibration grid only**: fixed 9.1 %, fill 8.5 %,
-difficulty 6.4 % MVC. So the difficulty law serves a ~30 % weaker user than
-fixed can. `run_kappa_sweep` (the headline) tests that prediction on the
-held-out evaluation grid across five κ, so no single κ is privileged;
-`run_closed_loop_grid` is one κ slice of it. Single-task runs only separate
-the laws at grid extremes — mid-difficulty tasks coincide by construction.
+inverse dynamics on the **calibration grid only** (`cl_critical_kappa.m`,
+which computes it; don't quote stale numbers after changing physics): fixed
+9.1 %, fill 8.5 %, difficulty 6.4 % MVC. So the difficulty law serves a
+~30 % weaker user than fixed can. `run_kappa_sweep` (the headline) tests
+that prediction on the held-out evaluation grid across five κ, so no single
+κ is privileged; `run_closed_loop_grid` is one κ slice of it. Measured
+zero-overload points land ~1.5–2 points *right* of the predicted critical κ
+(eval grid exceeds calibration extremes; closed-loop PD demand exceeds
+open-loop feedforward) with ordering and spacing preserved — critical κ is a
+rank-ordering prediction, not a threshold (caveats in `PAPER_CONTEXT.md`
+§7b). Overload detection lives in `cl_overload.m` and is assessed over the
+**whole run** — a carry-window-only check misses the hold-phase saturation
+that causes the droop. Single-task runs only separate the laws at grid
+extremes — mid-difficulty tasks coincide by construction.
 `build_closed_loop_model.m` is the reviewable source of truth for the
-gitignored `arm_closed_loop.slx` (`cl_needs_rebuild` rebuilds it when the
-builder or `cl_params.m` is newer); constants live in `cl_params.m`; α is
+gitignored `arm_closed_loop.slx`; constants live in `cl_params.m`; α is
 still computed A PRIORI per task via `controllers.m`.
 
 ## Design invariants — do not casually break these
@@ -145,7 +158,7 @@ them); each is documented in code comments where it lives:
 - **Fixed movement time** (`T_move = 1.0` for all distances) is Decision A:
   longer reaches are deliberately faster so distance is a real difficulty axis.
 
-## Figure conventions (`make_figures.m`)
+## Figure conventions (`make_figures.m`, `cl_figures.m`, grid/sweep figures)
 
 Every sweep figure is a 2D fill × distance map (`imagesc` + `axis xy`) or a bar
 chart — no 3D surfaces (they were tried and replaced as unreadable). Human-effort
@@ -153,3 +166,13 @@ maps use the custom band-diverging colormap: gray = inside the target band, blue
 = below (over-assisted), reds = above (under-supported), with color limits
 symmetric about the band center. `new_fig` keeps figures hidden under `-batch`
 and forces a light theme; figures are saved with `exportgraphics` at 200 dpi.
+
+Closed-loop figures: per-law Okabe-Ito colors (fixed blue `[0 114 178]`, fill
+orange `[230 159 0]`, difficulty green `[0 158 115]` /255), band shading via
+`yregion` (a `patch` before a categorical `bar` breaks the axis). Honesty
+markers are part of the convention: an **×** = human at the strength cap (its
+measured-effort point is deflated and not band-comparable), open **▽** = the
+effort that was demanded; never let a capped bar/point read as a clean in-band
+result. Don't hardcode interpretive claims in titles — the strength cap can
+falsify them at other κ (a "never settles" bar is drawn full-height + labeled,
+normalized to the ideal-human run, since fixed's `t_settle` can be NaN).
