@@ -21,13 +21,11 @@ function [tau_total, peak_slosh, slosh] = compute_required_torque(traj, f, p)
 %   slosh struct with the time series phi, phid and the surrogate
 %   parameters w_s, m_s, L_s (used by animate_carry).
 
-% Fill-dependent pendulum surrogate
-m_liq = p.cont.rho * pi * p.cont.Rc^2 * (f * p.cont.Hc);
-m_s   = p.slosh.k_m * m_liq;
-L_s   = p.slosh.L_s_factor * p.cont.Rc;   % slosh length scale (default Rc)
-w_s   = sqrt(p.g / L_s);
-zs    = p.slosh.zeta_s;
-pvec  = pack_pvec(p, m_s, L_s);
+% Fill-dependent pendulum surrogate (shared rules: slosh_surrogate.m)
+ss   = slosh_surrogate(f, p);
+m_s  = ss.m_s;  L_s = ss.L_s;  w_s = ss.w_s;
+zs   = p.slosh.zeta_s;
+pvec = ss.pvec;
 
 t = traj.t;  N = numel(t);
 

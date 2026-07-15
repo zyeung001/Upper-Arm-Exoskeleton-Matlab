@@ -74,13 +74,23 @@ cl.Tend = 5.0;               % s (slosh decay time 1/(zeta_s*w_s) ~ 1.4 s)
 cl.tol_ee = 0.01;            % settle tolerance on end-effector error (m)
 
 % ---- Closed-loop grid evaluation (run_closed_loop_grid) --------------------
-% A coarse grid SPANNING THE EXTREMES of the sweep's task space - the laws
-% only disagree at the corners (fixed over-assists easy tasks, under-
-% supports hard ones), so a single mid-range task cannot separate them.
-% One closed-loop simulation per task per law; band status is the metric,
-% mirroring the sweep's primary question.
-cl.grid_f = [0.1, 0.55, 1.0];    % fill levels
-cl.grid_d = [0.1, 0.3, 0.5];     % reach distances (m)
+% A grid SPANNING THE EXTREMES of the sweep's task space - the laws only
+% disagree at the corners (fixed over-assists easy tasks, under-supports hard
+% ones), so a single mid-range task cannot separate them. One closed-loop
+% simulation per task per law; band status is the metric, mirroring the
+% sweep's primary question.
+%
+% 5x5 (was 3x3): the critical-kappa result is the paper's headline, and the
+% kappa sweep is its evidence base - 9 tasks per kappa was too thin to carry
+% it. 25 tasks per kappa costs only wall-clock time.
+%
+% HELD OUT: every point is INTERLEAVED BETWEEN the calibration grid points
+% (p.calib.f = 0.15:0.2:0.95, p.calib.d = 0.125:0.0875:0.475), never on one -
+% the same train/test discipline as calibrate_controller, and asserted at the
+% top of run_closed_loop_grid. The old 3x3 centre (f = 0.55, d = 0.30) was
+% EXACTLY a calibration point; that leak is fixed here.
+cl.grid_f = [0.10, 0.30, 0.50, 0.70, 1.00];   % fill levels
+cl.grid_d = [0.10, 0.17, 0.25, 0.35, 0.50];   % reach distances (m)
 cl.Tend_grid = 2.0;              % s - carry + enough hold for band metrics
 
 % ---- Solver ----------------------------------------------------------------

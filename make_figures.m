@@ -197,15 +197,6 @@ fprintf('Figures saved to %s\n', outdir);
 end
 
 % ------------------------------------------------------------------------
-function fig = new_fig(sz)
-% Pop up in a desktop session; stay hidden under matlab -batch.
-vis = 'off';
-if usejava('desktop'), vis = 'on'; end
-fig = figure('Visible', vis, 'Color', hex2rgb('#fcfcfb'), ...
-    'Position', [80 80 sz]);
-fig.Theme = 'light';   % export must not follow a dark desktop theme
-end
-
 function style_map(ax, d, f, muted)
 % Shared heatmap chrome: y up, hairline white cell grid, recessive axes.
 axis(ax, 'xy');
