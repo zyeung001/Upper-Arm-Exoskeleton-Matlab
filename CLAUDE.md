@@ -25,11 +25,11 @@ addpath('closed_loop')
 run_closed_loop         % single-task deep dive: 4 sims (3 laws + ideal
                         % human), metrics table, controller + validation figs
 run_closed_loop(0.8, 0.4, Rebuild=true)   % force model rebuild
-run_closed_loop_grid    % 3x3 task grid x 3 laws (27 sims, ~5 min) ->
+run_closed_loop_grid    % 5x5 task grid x 3 laws (75 sims) ->
                         % coverage + accuracy figure at the default strength
 run_closed_loop_grid(Kappa=0.095)         % same grid, other user strength
 run_kappa_sweep         % THE closed-loop headline: the grid repeated at 5
-                        % user strengths (135 sims, ~30 min) -> pass rate,
+                        % user strengths (375 sims, ~1 h) -> pass rate,
                         % overload and RMSE vs how weak the user is
 animate_closed_loop     % animate the run in results/closed_loop_results.mat
 ```
@@ -74,6 +74,9 @@ liquid is a pendulum-equivalent surrogate (Bai et al. 2025) coupled both ways
 through M/C/G. `pack_pvec.m` defines the 15-element parameter-vector contract
 between `params` and the generated functions; if you change the symbolic
 parameter list in `derive_dynamics.m`, you must change `pack_pvec.m` to match.
+The fill→surrogate rules (m_liq → m_s, L_s, w_s, b_s, pvec) live in one place,
+`slosh_surrogate.m`, shared by the sweep and `closed_loop/` so the two studies
+cannot drift apart on the physics.
 
 `closed_loop/` (mentor-requested, 2026-07-13) is a SEPARATE closed-loop
 Simulink study: a PD + gravity-compensation controller tracks the same
@@ -86,7 +89,10 @@ literature, never tuned) while the exo responds instantly — this makes the
 laws, one simulation each, scored on the whiteboard metrics (RMSE, settle
 time, energy of u) plus human effort vs the band; a fourth ideal-human run
 (lag bypassed, uncapped) is the validation cross-check, matching the sweep's
-(1−α)·D within ~1% with identical band verdicts.
+(1−α)·D within ~1% at the deep-dive task; `cl_validate_surface.m` repeats the
+check across the four grid corners, the center and the default (worst case
+1.2%, law-independent — the split cancels, so it is plant fidelity not the α
+law), with identical band verdicts.
 
 The human also has a **strength cap** (`cl_params.u_h_max` = κ·MVC, a
 saturation on the lag integrator's *state* — activation cannot exceed 1, so
@@ -108,12 +114,22 @@ which computes it; don't quote stale numbers after changing physics): fixed
 9.1 %, fill 8.5 %, difficulty 6.4 % MVC. So the difficulty law serves a
 ~30 % weaker user than fixed can. `run_kappa_sweep` (the headline) tests
 that prediction on the held-out evaluation grid across five κ, so no single
-κ is privileged; `run_closed_loop_grid` is one κ slice of it. Measured
-zero-overload points land ~1.5–2 points *right* of the predicted critical κ
-(eval grid exceeds calibration extremes; closed-loop PD demand exceeds
-open-loop feedforward) with ordering and spacing preserved — critical κ is a
-rank-ordering prediction, not a threshold (caveats in `PAPER_CONTEXT.md`
-§7b). Overload detection lives in `cl_overload.m` and is assessed over the
+κ is privileged; `run_closed_loop_grid` is one κ slice of it. The closed-loop
+grid is **5×5, interleaved between the calibration points and asserted
+disjoint** — it is evaluation data, and critical κ is trained on calibration
+data, so an overlapping task would test the prediction on its own training
+set. Measured zero-overload points land ~1.5–2.5 points *right* of the
+predicted critical κ (eval grid exceeds calibration extremes; closed-loop PD
+demand exceeds open-loop feedforward). The difficulty law's ~2-point margin
+below the other two survives the shift; the fixed/fill pair (predicted only
+0.6 points apart) is NOT resolved at the sweep's 1.5-point κ resolution
+(tied/mildly inverted) — critical κ is a rank-ordering prediction for
+well-separated laws, not a threshold (caveats in `PAPER_CONTEXT.md` §7b).
+**Below its critical κ the difficulty law is the WORST of the three** (at
+κ = 5 %: 17 of 25 tasks over-demanded, vs 12 for fixed) — it targets constant
+human effort on every task, so it never lets a very weak user off easy the way
+a fixed α = 0.5 share does on an easy carry. The claim has a floor, not just a
+direction; never phrase it as "good for weak users". Overload detection lives in `cl_overload.m` and is assessed over the
 **whole run** — a carry-window-only check misses the hold-phase saturation
 that causes the droop. Single-task runs only separate the laws at grid
 extremes — mid-difficulty tasks coincide by construction.
@@ -164,8 +180,13 @@ Every sweep figure is a 2D fill × distance map (`imagesc` + `axis xy`) or a bar
 chart — no 3D surfaces (they were tried and replaced as unreadable). Human-effort
 maps use the custom band-diverging colormap: gray = inside the target band, blues
 = below (over-assisted), reds = above (under-supported), with color limits
-symmetric about the band center. `new_fig` keeps figures hidden under `-batch`
-and forces a light theme; figures are saved with `exportgraphics` at 200 dpi.
+symmetric about the band center. The shared `new_fig.m` (root) keeps figures
+hidden under `-batch` and forces a light theme; figures are saved with
+`exportgraphics` at 200 dpi. `cl_grid_figure.m` / `cl_kappa_figure.m` are
+standalone so the grid and κ-sweep figures can be regenerated from the saved
+`results/*.mat` without re-running the simulations. Titles that state the
+evidence base (grid size, κ) are built with `sprintf` from the result struct,
+never hardcoded — a hardcoded "3x3" once shipped over 5×5 data.
 
 Closed-loop figures: per-law Okabe-Ito colors (fixed blue `[0 114 178]`, fill
 orange `[230 159 0]`, difficulty green `[0 158 115]` /255), band shading via

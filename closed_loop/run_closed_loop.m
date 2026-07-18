@@ -49,12 +49,9 @@ if isnan(f), f = cl.f_default; end
 if isnan(d), d = cl.d_default; end
 
 % ---- Slosh surrogate for this fill level (same rules as the sweep) ---------
-m_liq = p.cont.rho * pi * p.cont.Rc^2 * (f * p.cont.Hc);
-m_s   = p.slosh.k_m * m_liq;
-L_s   = p.slosh.L_s_factor * p.cont.Rc;
-w_s   = sqrt(p.g / L_s);
-b_s   = 2 * p.slosh.zeta_s * w_s * m_s * L_s^2;   % matches the damped surrogate
-pvec  = pack_pvec(p, m_s, L_s);
+ss   = slosh_surrogate(f, p);
+b_s  = ss.b_s;      % matches the damped surrogate in compute_required_torque
+pvec = ss.pvec;
 
 % ---- Reference + a-priori task difficulty and alphas ------------------------
 [Xref, VelRef, traj, tt, qref] = cl_reference(d, cl.Tend, p);
@@ -136,7 +133,7 @@ astr = arrayfun(@(L) sprintf('%s = %.2f', laws{L}, alpha(L)), 1:nl, ...
 fprintf('\nClosed-loop comparison: fill = %.2f, distance = %.2f m\n', f, d);
 fprintf('  difficulty D = %.2f N m s (a priori), alpha: %s\n', D, strjoin(astr, ', '));
 fprintf('  human torque lag tau_h = %.0f ms; exo instantaneous\n', 1e3 * cl.tau_h);
-fprintf(['  human strength cap = %.0f%% MVC -> [%.1f %.1f %.1f] N m per joint\n'], ...
+fprintf('  human strength cap = %.0f%% MVC -> [%.1f %.1f %.1f] N m per joint\n', ...
     100 * cl.kappa, cl.u_h_max);
 fprintf('  target human-effort band = [%.2f, %.2f] N m s (carry window)\n\n', ...
     p.band.E_low, p.band.E_high);

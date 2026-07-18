@@ -171,12 +171,3 @@ title(ax, 'Effort matches the sweep');
 exportgraphics(fig, fullfile(outdir, 'closed_loop_validation.png'), 'Resolution', 200);
 fprintf('Wrote closed-loop figures to %s\n', outdir);
 end
-
-% ------------------------------------------------------------------------
-function fig = new_fig(sz)
-% Same convention as make_figures.m: pop up on a desktop, hidden in -batch.
-vis = 'off';
-if usejava('desktop'), vis = 'on'; end
-fig = figure('Visible', vis, 'Color', [252 252 251]/255, 'Position', [80 80 sz]);
-fig.Theme = 'light';
-end
